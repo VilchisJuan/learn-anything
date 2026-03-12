@@ -32,7 +32,7 @@ export function HomeContent() {
           <Layers size={11} />
           Interactive Learning Platform
         </div>
-        <h1 className="text-4xl font-bold text-foreground tracking-tight">
+        <h1 className="text-2xl md:text-4xl font-bold text-foreground tracking-tight">
           Learn anything,{" "}
           <span className="text-primary">interactively.</span>
         </h1>

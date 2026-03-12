@@ -24,7 +24,12 @@ const AREA_ICONS: Record<string, React.ReactNode> = {
   "cognitive-science": <Brain size={16} />,
 };
 
-export function Sidebar() {
+interface SidebarProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const activeArea = pathname.split("/")[1] ?? null;
   const [expandedArea, setExpandedArea] = useState<string | null>(
@@ -35,11 +40,12 @@ export function Sidebar() {
     setExpandedArea((prev) => (prev === areaId ? null : areaId));
   }
 
-  return (
-    <aside className="w-64 shrink-0 border-r border-border bg-sidebar flex flex-col h-full overflow-hidden">
+  const sidebarContent = (
+    <>
       {/* Logo */}
       <Link
         href="/"
+        onClick={onClose}
         className="h-14 flex items-center gap-2.5 px-5 border-b border-border shrink-0 hover:bg-accent/40 transition-colors"
       >
         <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center">
@@ -60,6 +66,7 @@ export function Sidebar() {
               area={area}
               isExpanded={expandedArea === area.id}
               onToggle={() => toggleArea(area.id)}
+              onLinkClick={onClose}
             />
           ))}
         </ul>
@@ -72,7 +79,45 @@ export function Sidebar() {
           <span>Experiments enabled</span>
         </div>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Desktop sidebar — always visible */}
+      <aside className="hidden md:flex w-64 shrink-0 border-r border-border bg-sidebar flex-col h-full overflow-hidden">
+        {sidebarContent}
+      </aside>
+
+      {/* Mobile drawer */}
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              key="backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 z-40 bg-black/60 md:hidden"
+              onClick={onClose}
+            />
+            {/* Drawer */}
+            <motion.aside
+              key="drawer"
+              initial={{ x: "-100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "-100%" }}
+              transition={{ type: "spring", stiffness: 300, damping: 35 }}
+              className="fixed inset-y-0 left-0 z-50 w-72 bg-sidebar flex flex-col overflow-hidden md:hidden"
+            >
+              {sidebarContent}
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
 
@@ -80,9 +125,10 @@ interface AreaItemProps {
   area: NavArea;
   isExpanded: boolean;
   onToggle: () => void;
+  onLinkClick: () => void;
 }
 
-function AreaItem({ area, isExpanded, onToggle }: AreaItemProps) {
+function AreaItem({ area, isExpanded, onToggle, onLinkClick }: AreaItemProps) {
   return (
     <li>
       <button
@@ -123,7 +169,12 @@ function AreaItem({ area, isExpanded, onToggle }: AreaItemProps) {
             className="overflow-hidden mt-0.5 ml-2 pl-3 border-l border-border space-y-0.5"
           >
             {area.topics.map((topic) => (
-              <TopicItem key={topic.id} areaId={area.id} topic={topic} />
+              <TopicItem
+                key={topic.id}
+                areaId={area.id}
+                topic={topic}
+                onLinkClick={onLinkClick}
+              />
             ))}
           </motion.ul>
         )}
@@ -135,9 +186,10 @@ function AreaItem({ area, isExpanded, onToggle }: AreaItemProps) {
 interface TopicItemProps {
   areaId: string;
   topic: NavTopic;
+  onLinkClick: () => void;
 }
 
-function TopicItem({ areaId, topic }: TopicItemProps) {
+function TopicItem({ areaId, topic, onLinkClick }: TopicItemProps) {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState(
     pathname.includes(`/${areaId}/${topic.id}`)
@@ -185,6 +237,7 @@ function TopicItem({ areaId, topic }: TopicItemProps) {
                   <li key={sub.id}>
                     <Link
                       href={subPath}
+                      onClick={onLinkClick}
                       className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs transition-colors ${
                         isSubActive
                           ? "text-primary font-medium bg-primary/10"
@@ -208,6 +261,7 @@ function TopicItem({ areaId, topic }: TopicItemProps) {
     <li>
       <Link
         href={topicPath}
+        onClick={onLinkClick}
         className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors ${
           isActive
             ? "text-primary font-medium bg-primary/10"

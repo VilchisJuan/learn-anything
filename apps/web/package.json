@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
+    "predev": "fuser -k 3002/tcp 2>/dev/null; true",
     "dev": "next dev --turbopack --port 3002",
     "build": "next build",
     "start": "next start",

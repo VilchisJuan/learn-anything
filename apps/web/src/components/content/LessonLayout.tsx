@@ -147,10 +147,10 @@ export function LessonLayout({ lesson }: LessonLayoutProps) {
             <span>/</span>
             <span className="capitalize">{frontmatter.topic.replace(/-/g, " ")}</span>
           </div>
-          <h1 className="text-3xl font-bold text-foreground mb-3 tracking-tight">
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-3 tracking-tight">
             {frontmatter.title}
           </h1>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <LevelBadge level={frontmatter.level} />
             <p className="text-sm text-muted-foreground">{frontmatter.description}</p>
           </div>
