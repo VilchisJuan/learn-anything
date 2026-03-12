@@ -21,16 +21,6 @@ Every time a function is called, the program creates a **stack frame** (also cal
 
 When the function returns, its stack frame is popped off and that memory is immediately reclaimed — no cleanup code required.
 
-<StackVisualizer />
-
-Step through the simulation above to see exactly how frames are pushed onto the stack during recursion and popped as each function returns.
-
-## Try It Yourself
-
-Now push your own function calls onto the stack. Enter a function name and any parameters you want, push it, then pop it to simulate it returning. Try building a recursive call chain and see how deep you can go before hitting a stack overflow.
-
-<StackExercise />
-
 ```c
 void greet(char* name) {
   char greeting[50]; // allocated on the stack automatically
@@ -90,6 +80,18 @@ The stack and [heap](/programming/memory-management/heap) are both memory region
 - The [heap](/programming/memory-management/heap) is **flexible and long-lived** — data can outlive any function, but requires explicit or garbage-collected management.
 
 Use the stack for short-lived, fixed-size data. Use the [heap](/programming/memory-management/heap) when you need data to persist after the creating function returns, or when the size is unknown at compile time.
+
+## See It in Action
+
+Step through the simulation below. Each step shows a concept from above: watch the **stack pointer** (SP) change address on every push and pop, see the **return address** stored inside each frame, and observe the **LIFO order** as the stack unwinds.
+
+<StackVisualizer />
+
+## Try It Yourself
+
+Push your own function calls onto the stack. Try building a deep recursive call chain — the exercise will warn you as you approach overflow territory.
+
+<StackExercise />
 
 ## Related Topics
 

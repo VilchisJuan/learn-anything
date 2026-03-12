@@ -13,12 +13,14 @@ interface StackFrame {
   id: string;
   functionName: string;
   locals: { name: string; value: string }[];
+  returnAddr: string;
   returnValue?: string;
   color: string;
 }
 
 interface ScenarioStep {
   description: string;
+  concept: string;
   event: "start" | "push" | "pop" | "update" | "end";
   frames: StackFrame[];
 }
@@ -40,27 +42,80 @@ const LABEL_COLORS = [
 
 const main = (result: string): StackFrame => ({
   id: "main", functionName: "main()",
-  locals: [{ name: "result", value: result }], color: COLORS[0],
+  locals: [{ name: "result", value: result }],
+  returnAddr: "OS",
+  color: COLORS[0],
 });
 
 const fact = (n: number, returns?: string): StackFrame => ({
   id: `fact-${n}`, functionName: "factorial(n)",
   locals: [{ name: "n", value: String(n) }],
+  returnAddr: n === 4 ? "main·L7" : "fact·L3",
   returnValue: returns,
   color: COLORS[(5 - n) % COLORS.length],
 });
 
 const SCENARIO: ScenarioStep[] = [
-  { event: "start", description: "The program begins. main() is the first function — its stack frame is created automatically.", frames: [main("?")] },
-  { event: "push",  description: "main() calls factorial(4). A new stack frame is pushed on top, holding n=4 as a local variable.", frames: [main("?"), fact(4)] },
-  { event: "push",  description: "factorial(4) calls factorial(3) recursively. Another frame is pushed — each call is independent.", frames: [main("?"), fact(4), fact(3)] },
-  { event: "push",  description: "factorial(3) calls factorial(2). The stack keeps growing with each recursive call.", frames: [main("?"), fact(4), fact(3), fact(2)] },
-  { event: "push",  description: "factorial(2) calls factorial(1). This is the base case — the deepest point in the recursion.", frames: [main("?"), fact(4), fact(3), fact(2), fact(1)] },
-  { event: "pop",   description: "factorial(1) hits the base case (n=1) and returns 1. Its frame is popped — memory is instantly freed.", frames: [main("?"), fact(4), fact(3), fact(2, "→ 2×1 = 2")] },
-  { event: "pop",   description: "factorial(2) receives the result, computes 2×1=2, and returns. Its frame is also popped.", frames: [main("?"), fact(4), fact(3, "→ 3×2 = 6")] },
-  { event: "pop",   description: "factorial(3) returns 3×2=6. The stack is unwinding — each pop is free and instantaneous.", frames: [main("?"), fact(4, "→ 4×6 = 24")] },
-  { event: "pop",   description: "factorial(4) returns 4×6=24. Only main() remains on the stack.", frames: [main("24")] },
-  { event: "end",   description: "main() stores the result (24) and returns. The stack frame is popped and the program exits cleanly.", frames: [] },
+  {
+    event: "start",
+    concept: "Stack Frame · LIFO",
+    description: "Program starts. main() is the entry point — its stack frame is pushed automatically. The stack pointer (SP) moves down to the new top of stack.",
+    frames: [main("?")],
+  },
+  {
+    event: "push",
+    concept: "Stack Pointer · Return Address",
+    description: "main() calls factorial(4). A new frame is pushed: SP decrements by one frame size. The frame stores n=4 and a return address pointing back to main line 7.",
+    frames: [main("?"), fact(4)],
+  },
+  {
+    event: "push",
+    concept: "Stack Pointer · Return Address",
+    description: "factorial(4) calls factorial(3). Another frame is pushed, SP decrements again. Each frame independently stores its own local n and a return address.",
+    frames: [main("?"), fact(4), fact(3)],
+  },
+  {
+    event: "push",
+    concept: "Stack Pointer · Recursion",
+    description: "factorial(3) calls factorial(2). The stack keeps growing downward. Each recursive call is completely isolated — variables in different frames never interfere.",
+    frames: [main("?"), fact(4), fact(3), fact(2)],
+  },
+  {
+    event: "push",
+    concept: "Stack Overflow Risk · Base Case",
+    description: "factorial(2) calls factorial(1) — the base case. Without a base case, recursion would continue until the stack exhausts its size limit and crashes (stack overflow).",
+    frames: [main("?"), fact(4), fact(3), fact(2), fact(1)],
+  },
+  {
+    event: "pop",
+    concept: "LIFO · Automatic Memory Reclaim",
+    description: "factorial(1) returns 1. Its frame is instantly popped — SP increments back. No cleanup needed. Execution jumps to the return address saved in the frame (fact·L3).",
+    frames: [main("?"), fact(4), fact(3), fact(2, "→ 2×1=2")],
+  },
+  {
+    event: "pop",
+    concept: "LIFO · Return Address",
+    description: "factorial(2) receives 1, computes 2×1=2, returns. Frame popped, SP increments. Control transfers to the return address in the next frame down.",
+    frames: [main("?"), fact(4), fact(3, "→ 3×2=6")],
+  },
+  {
+    event: "pop",
+    concept: "LIFO · Stack Unwinding",
+    description: "factorial(3) returns 6. Stack unwinding: each pop is O(1) — just SP += frame_size. No garbage collection, no scanning, no overhead.",
+    frames: [main("?"), fact(4, "→ 4×6=24")],
+  },
+  {
+    event: "pop",
+    concept: "LIFO · Stack Unwinding",
+    description: "factorial(4) returns 24. Only main() remains on the stack. The recursion is fully resolved.",
+    frames: [main("24")],
+  },
+  {
+    event: "end",
+    concept: "Stack Empty · Program Exit",
+    description: "main() stores result=24 and returns. Its frame is popped and SP returns to the base address. The stack is empty — the OS reclaims the entire stack region.",
+    frames: [],
+  },
 ];
 
 // ─── Code Examples ────────────────────────────────────────────────────────────
@@ -295,6 +350,10 @@ export const useStackStore = create<StackStore>((set, get) => ({
 
 const MAX_VISIBLE = 6;
 
+// SP register simulation — stack grows downward from a fixed base address
+const SP_BASE    = 0xff00;
+const FRAME_SIZE = 0x40; // 64 bytes per frame (simplified)
+
 export function StackVisualizer() {
   const { step, isPlaying, speed, next, prev, setPlaying, setSpeed, reset } = useStackStore();
   const [lang, setLang] = useState<Lang>("c");
@@ -305,6 +364,9 @@ export function StackVisualizer() {
   const atEnd   = step === SCENARIO.length - 1;
   const atStart = step === 0;
   const danger  = frames.length >= MAX_VISIBLE - 1;
+
+  const spNum = SP_BASE - frames.length * FRAME_SIZE;
+  const spHex = `0x${spNum.toString(16).toUpperCase()}`;
 
   useEffect(() => {
     if (isPlaying) {
@@ -335,9 +397,35 @@ export function StackVisualizer() {
         {/* Stack visual */}
         <div className="flex-1 flex flex-col px-3 md:px-5 py-4">
           {/* Stack Base at TOP (high address) */}
-          <div className="shrink-0 border-b-2 border-border/50 pb-1.5 mb-3 flex items-center gap-2">
+          <div className="shrink-0 border-b-2 border-border/50 pb-1.5 mb-2 flex items-center gap-2">
             <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Stack Base · High Address</span>
             {danger && <span className="ml-auto text-[9px] text-amber-400">stack growing deep</span>}
+          </div>
+
+          {/* SP register display */}
+          <div className="shrink-0 flex items-center gap-2 mb-3 px-0.5">
+            <span className="text-[9px] font-mono font-semibold text-muted-foreground uppercase tracking-wider w-5">SP</span>
+            <AnimatePresence mode="wait">
+              <motion.span
+                key={spHex}
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 4 }}
+                transition={{ duration: 0.18 }}
+                className="font-mono text-[10px] text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20"
+              >
+                {spHex}
+              </motion.span>
+            </AnimatePresence>
+            <span className="text-[9px] text-muted-foreground/40 font-mono truncate">
+              {frames.length === 0
+                ? "stack empty"
+                : current.event === "push"
+                ? `push → SP − 0x${FRAME_SIZE.toString(16)}`
+                : current.event === "pop"
+                ? `pop → SP + 0x${FRAME_SIZE.toString(16)}`
+                : "pointer arithmetic"}
+            </span>
           </div>
 
           {/* Frames in natural order — main at top, newest (SP) at bottom */}
@@ -367,21 +455,23 @@ export function StackVisualizer() {
                     transition={{ type: "spring", stiffness: 280, damping: 26 }}
                     className={`rounded-md border px-3 py-2 ${frame.color} ${isSP ? "ring-1 ring-indigo-500/40" : ""}`}
                   >
-                    {/* Row 1: function name + locals */}
-                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                    {/* Row 1: function name + return address */}
+                    <div className="flex items-center justify-between gap-2 min-w-0">
                       <span className={`text-[11px] font-mono font-semibold shrink-0 ${labelColor}`}>{frame.functionName}</span>
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 ml-auto">
-                        {frame.locals.map((l) => (
-                          <span key={l.name} className="text-[10px] font-mono whitespace-nowrap">
-                            <span className="text-foreground/55">{l.name}</span>
-                            <span className="text-foreground/35 mx-px">=</span>
-                            <span className="text-foreground/90">{l.value}</span>
-                          </span>
-                        ))}
-                        {frame.returnValue && (
-                          <span className="text-[10px] font-mono text-emerald-400 whitespace-nowrap">→ {frame.returnValue}</span>
-                        )}
-                      </div>
+                      <span className="text-[9px] font-mono text-muted-foreground/50 shrink-0">ret→{frame.returnAddr}</span>
+                    </div>
+                    {/* Row 2: locals + return value */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                      {frame.locals.map((l) => (
+                        <span key={l.name} className="text-[10px] font-mono whitespace-nowrap">
+                          <span className="text-foreground/55">{l.name}</span>
+                          <span className="text-foreground/35 mx-px">=</span>
+                          <span className="text-foreground/90">{l.value}</span>
+                        </span>
+                      ))}
+                      {frame.returnValue && (
+                        <span className="text-[10px] font-mono text-emerald-400 whitespace-nowrap">{frame.returnValue}</span>
+                      )}
                     </div>
                     {/* SP indicator inside active frame */}
                     {isSP && (
@@ -427,7 +517,7 @@ export function StackVisualizer() {
             <CodePanel lang={lang} step={step} />
           </div>
 
-          {/* Description + event + depth chart */}
+          {/* Description + concept + event + depth chart */}
           <div className="p-5 flex flex-col gap-4 md:flex-1 md:overflow-y-auto">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">What's happening</p>
@@ -445,8 +535,19 @@ export function StackVisualizer() {
               </AnimatePresence>
             </div>
 
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Event</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Concept tag */}
+              <AnimatePresence mode="wait">
+                <motion.span
+                  key={current.concept}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono border text-indigo-300 border-indigo-400/20 bg-indigo-400/8"
+                >
+                  {current.concept}
+                </motion.span>
+              </AnimatePresence>
+              {/* Event badge */}
               <AnimatePresence mode="wait">
                 <motion.span
                   key={current.event}
