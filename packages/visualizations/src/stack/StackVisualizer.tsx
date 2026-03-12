@@ -393,7 +393,7 @@ export function StackVisualizer() {
         )}
       </div>
 
-      <div className="flex flex-row h-[420px] md:h-[460px]">
+      <div className="flex flex-row h-[420px] md:h-[460px] overflow-hidden">
         {/* Stack visual */}
         <div className="flex-1 flex flex-col px-2 md:px-5 py-4 min-h-0">
           {/* Stack Base at TOP (high address) */}
@@ -429,7 +429,7 @@ export function StackVisualizer() {
           </div>
 
           {/* Frames in natural order — main at top, newest (SP) at bottom */}
-          <div className="flex flex-col gap-1.5 flex-1 overflow-y-auto">
+          <div className="flex flex-col gap-1.5 flex-1 overflow-y-auto min-h-0">
             <AnimatePresence mode="popLayout">
               {frames.length === 0 && (
                 <motion.div
@@ -518,7 +518,7 @@ export function StackVisualizer() {
           </div>
 
           {/* Description + concept + event + depth chart */}
-          <div className="p-3 md:p-5 flex flex-col gap-3 flex-1 overflow-y-auto">
+          <div className="p-3 md:p-5 flex flex-col gap-3 flex-1 overflow-y-auto min-h-0">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">What's happening</p>
               <AnimatePresence mode="wait">
