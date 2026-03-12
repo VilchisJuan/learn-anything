@@ -518,7 +518,7 @@ export function StackVisualizer() {
           </div>
 
           {/* Description + concept + event + depth chart */}
-          <div className="p-5 flex flex-col gap-4 md:flex-1 md:overflow-y-auto">
+          <div className="p-3 md:p-5 flex flex-col gap-3 flex-1 overflow-y-auto">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">What's happening</p>
               <AnimatePresence mode="wait">
