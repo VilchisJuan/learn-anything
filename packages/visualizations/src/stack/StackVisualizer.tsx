@@ -393,9 +393,9 @@ export function StackVisualizer() {
         )}
       </div>
 
-      <div className="flex flex-col md:flex-row h-[420px] md:h-[460px]">
+      <div className="flex flex-row h-[420px] md:h-[460px]">
         {/* Stack visual */}
-        <div className="flex-1 flex flex-col px-3 md:px-5 py-4 min-h-0">
+        <div className="flex-1 flex flex-col px-2 md:px-5 py-4 min-h-0">
           {/* Stack Base at TOP (high address) */}
           <div className="shrink-0 border-b-2 border-border/50 pb-1.5 mb-2 flex items-center gap-2">
             <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Stack Base · High Address</span>
@@ -493,7 +493,7 @@ export function StackVisualizer() {
         </div>
 
         {/* Right panel — language tabs + code + description */}
-        <div className="w-full md:w-80 md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-[#0a0a0a] flex flex-col min-h-0">
+        <div className="w-44 md:w-80 shrink-0 border-l border-border bg-[#0a0a0a] flex flex-col min-h-0">
 
           {/* Language tabs */}
           <div className="flex border-b border-border shrink-0">
@@ -513,7 +513,7 @@ export function StackVisualizer() {
           </div>
 
           {/* Code with live line highlight */}
-          <div className="border-b border-border md:overflow-y-auto md:max-h-56">
+          <div className="border-b border-border overflow-y-auto max-h-44 md:max-h-56">
             <CodePanel lang={lang} step={step} />
           </div>
 
