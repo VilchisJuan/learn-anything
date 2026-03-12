@@ -394,101 +394,102 @@ export function StackVisualizer() {
       </div>
 
       <div className="flex flex-row h-[420px] md:h-[460px] overflow-hidden">
-        {/* Stack visual */}
-        <div className="flex-1 flex flex-col px-2 md:px-5 py-4 min-h-0">
-          {/* Stack Base at TOP (high address) */}
-          <div className="shrink-0 border-b-2 border-border/50 pb-1.5 mb-2 flex items-center gap-2">
-            <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Stack Base · High Address</span>
-            {danger && <span className="ml-auto text-[9px] text-amber-400">stack growing deep</span>}
-          </div>
+        {/* Stack visual — hard clip, single scrollable inner */}
+        <div className="flex-1 overflow-hidden">
+          <div className="h-full overflow-y-auto px-2 md:px-5 py-4 flex flex-col gap-2">
+            {/* Stack Base at TOP (high address) */}
+            <div className="border-b-2 border-border/50 pb-1.5 flex items-center gap-2">
+              <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Stack Base · High Address</span>
+              {danger && <span className="ml-auto text-[9px] text-amber-400">stack growing deep</span>}
+            </div>
 
-          {/* SP register display */}
-          <div className="shrink-0 flex items-center gap-2 mb-3 px-0.5">
-            <span className="text-[9px] font-mono font-semibold text-muted-foreground uppercase tracking-wider w-5">SP</span>
-            <AnimatePresence mode="wait">
-              <motion.span
-                key={spHex}
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 4 }}
-                transition={{ duration: 0.18 }}
-                className="font-mono text-[10px] text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20"
-              >
-                {spHex}
-              </motion.span>
-            </AnimatePresence>
-            <span className="text-[9px] text-muted-foreground/40 font-mono truncate">
-              {frames.length === 0
-                ? "stack empty"
-                : current.event === "push"
-                ? `push → SP − 0x${FRAME_SIZE.toString(16)}`
-                : current.event === "pop"
-                ? `pop → SP + 0x${FRAME_SIZE.toString(16)}`
-                : "pointer arithmetic"}
-            </span>
-          </div>
-
-          {/* Frames in natural order — main at top, newest (SP) at bottom */}
-          <div className="flex flex-col gap-1.5 flex-1 overflow-y-auto min-h-0">
-            <AnimatePresence mode="popLayout">
-              {frames.length === 0 && (
-                <motion.div
-                  key="empty"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="flex-1 flex items-center justify-center text-muted-foreground text-sm py-10"
+            {/* SP register display */}
+            <div className="flex items-center gap-2 px-0.5">
+              <span className="text-[9px] font-mono font-semibold text-muted-foreground uppercase tracking-wider w-5">SP</span>
+              <AnimatePresence mode="wait">
+                <motion.span
+                  key={spHex}
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 4 }}
+                  transition={{ duration: 0.18 }}
+                  className="font-mono text-[10px] text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20"
                 >
-                  Stack is empty — program exited
-                </motion.div>
-              )}
-              {frames.map((frame, i) => {
-                const isSP       = i === frames.length - 1;
-                const labelColor = LABEL_COLORS[i % LABEL_COLORS.length];
-                return (
-                  <motion.div
-                    key={frame.id}
-                    layout
-                    initial={{ opacity: 0, y: -16, scale: 0.97 }}
-                    animate={{ opacity: 1, y: 0,   scale: 1    }}
-                    exit={{    opacity: 0, y: -12,  scale: 0.96 }}
-                    transition={{ type: "spring", stiffness: 280, damping: 26 }}
-                    className={`rounded-md border px-3 py-2 ${frame.color} ${isSP ? "ring-1 ring-indigo-500/40" : ""}`}
-                  >
-                    {/* Row 1: function name + return address */}
-                    <div className="flex items-center justify-between gap-2 min-w-0">
-                      <span className={`text-[11px] font-mono font-semibold shrink-0 ${labelColor}`}>{frame.functionName}</span>
-                      <span className="text-[9px] font-mono text-muted-foreground/50 shrink-0">ret→{frame.returnAddr}</span>
-                    </div>
-                    {/* Row 2: locals + return value */}
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
-                      {frame.locals.map((l) => (
-                        <span key={l.name} className="text-[10px] font-mono whitespace-nowrap">
-                          <span className="text-foreground/55">{l.name}</span>
-                          <span className="text-foreground/35 mx-px">=</span>
-                          <span className="text-foreground/90">{l.value}</span>
-                        </span>
-                      ))}
-                      {frame.returnValue && (
-                        <span className="text-[10px] font-mono text-emerald-400 whitespace-nowrap">{frame.returnValue}</span>
-                      )}
-                    </div>
-                    {/* SP indicator inside active frame */}
-                    {isSP && (
-                      <div className="mt-1 flex items-center gap-0.5 text-[9px] text-indigo-400/70 font-mono">
-                        <ChevronDown size={8} /> SP · active frame
-                      </div>
-                    )}
-                  </motion.div>
-                );
-              })}
-            </AnimatePresence>
+                  {spHex}
+                </motion.span>
+              </AnimatePresence>
+              <span className="text-[9px] text-muted-foreground/40 font-mono truncate">
+                {frames.length === 0
+                  ? "stack empty"
+                  : current.event === "push"
+                  ? `push → SP − 0x${FRAME_SIZE.toString(16)}`
+                  : current.event === "pop"
+                  ? `pop → SP + 0x${FRAME_SIZE.toString(16)}`
+                  : "pointer arithmetic"}
+              </span>
+            </div>
 
-            {frames.length > 0 && (
-              <motion.div layout className="text-[9px] text-muted-foreground/50 text-center pt-1 uppercase tracking-wider">
-                Low address · stack grows ↓
-              </motion.div>
-            )}
+            {/* Frames — scroll with rest of content */}
+            <div className="flex flex-col gap-1.5">
+              <AnimatePresence mode="popLayout">
+                {frames.length === 0 && (
+                  <motion.div
+                    key="empty"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="flex items-center justify-center text-muted-foreground text-sm py-10"
+                  >
+                    Stack is empty — program exited
+                  </motion.div>
+                )}
+                {frames.map((frame, i) => {
+                  const isSP       = i === frames.length - 1;
+                  const labelColor = LABEL_COLORS[i % LABEL_COLORS.length];
+                  return (
+                    <motion.div
+                      key={frame.id}
+                      initial={{ opacity: 0, y: -16, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0,   scale: 1    }}
+                      exit={{    opacity: 0, y: -12,  scale: 0.96 }}
+                      transition={{ type: "spring", stiffness: 280, damping: 26 }}
+                      className={`rounded-md border px-3 py-2 ${frame.color} ${isSP ? "ring-1 ring-indigo-500/40" : ""}`}
+                    >
+                      {/* Row 1: function name + return address */}
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <span className={`text-[11px] font-mono font-semibold shrink-0 ${labelColor}`}>{frame.functionName}</span>
+                        <span className="text-[9px] font-mono text-muted-foreground/50 shrink-0">ret→{frame.returnAddr}</span>
+                      </div>
+                      {/* Row 2: locals + return value */}
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                        {frame.locals.map((l) => (
+                          <span key={l.name} className="text-[10px] font-mono whitespace-nowrap">
+                            <span className="text-foreground/55">{l.name}</span>
+                            <span className="text-foreground/35 mx-px">=</span>
+                            <span className="text-foreground/90">{l.value}</span>
+                          </span>
+                        ))}
+                        {frame.returnValue && (
+                          <span className="text-[10px] font-mono text-emerald-400 whitespace-nowrap">{frame.returnValue}</span>
+                        )}
+                      </div>
+                      {/* SP indicator inside active frame */}
+                      {isSP && (
+                        <div className="mt-1 flex items-center gap-0.5 text-[9px] text-indigo-400/70 font-mono">
+                          <ChevronDown size={8} /> SP · active frame
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+
+              {frames.length > 0 && (
+                <div className="text-[9px] text-muted-foreground/50 text-center pt-1 uppercase tracking-wider">
+                  Low address · stack grows ↓
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
