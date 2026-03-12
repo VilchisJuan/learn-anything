@@ -394,9 +394,8 @@ export function StackVisualizer() {
       </div>
 
       <div className="flex flex-row h-[420px] md:h-[460px] overflow-hidden">
-        {/* Stack visual — hard clip, single scrollable inner */}
-        <div className="flex-1 overflow-hidden">
-          <div className="h-full overflow-y-auto px-2 md:px-5 py-4 flex flex-col gap-2">
+        {/* Stack visual — flex-1 scrolls vertically, holds width */}
+        <div className="flex-1 min-w-0 min-h-0 overflow-y-auto px-2 md:px-5 py-4 flex flex-col gap-2">
             {/* Stack Base at TOP (high address) */}
             <div className="border-b-2 border-border/50 pb-1.5 flex items-center gap-2">
               <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Stack Base · High Address</span>
@@ -490,7 +489,6 @@ export function StackVisualizer() {
                 </div>
               )}
             </div>
-          </div>
         </div>
 
         {/* Right panel — language tabs + code + description */}
