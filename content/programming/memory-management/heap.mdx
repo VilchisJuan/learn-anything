@@ -1,0 +1,116 @@
+---
+title: Heap Memory
+description: How dynamic memory allocation works, why it exists, and how languages manage it automatically or manually.
+level: intermediate
+area: programming
+topic: memory-management
+---
+
+**Heap memory** is a region of memory used for **dynamic memory allocation** — memory that is requested and released during program execution, at runtime, as needed. Unlike [stack memory](/programming/memory-management/stack), heap allocations are not automatically tied to any function's lifetime.
+
+The heap is managed either **manually** (by the programmer, as in C and C++) or **automatically** (by a garbage collector, as in Java, Python, Go, and JavaScript).
+
+## Why the Heap Exists
+
+Some situations make stack allocation impossible or impractical:
+
+1. **Size unknown at compile time** — you don't know how large an array will be until the user provides input at runtime.
+2. **Data must outlive its creating function** — a function builds a data structure that other parts of the program need to keep using after it returns.
+3. **Large allocations** — the [stack](/programming/memory-management/stack) is limited (typically 1–8 MB); the heap can grow to fill all available RAM.
+
+```c
+// We don't know 'n' until runtime — the stack cannot handle this
+int* create_array(int n) {
+  int* arr = malloc(n * sizeof(int)); // allocated on the heap
+  return arr; // safe — heap data survives the function returning
+}
+
+int main() {
+  int* data = create_array(1000000); // still alive here
+  free(data); // we must release it manually when done
+}
+```
+
+## How Heap Allocation Works
+
+<HeapAnimation />
+
+Watch the animation above to follow a real allocation sequence — from an empty heap through several mallocs and frees, ending with a fragmentation failure that makes an allocation impossible despite enough total free memory.
+
+## Try It Yourself
+
+Now experiment freely. Allocate blocks of any size and name, free them in any order, and observe how the memory map changes. The **Demo: fragmentation** button runs a preset scenario you can then continue from.
+
+<HeapVisualizer />
+
+When you request heap memory, the **memory allocator** (part of the standard library or runtime) searches a pool of free memory for a block large enough to satisfy the request, marks it as used, and returns a pointer to it.
+
+Common allocator operations:
+
+| Operation | C | C++ | Effect |
+|---|---|---|---|
+| Allocate | `malloc(size)` | `new T` | Reserve a block on the heap |
+| Resize | `realloc(ptr, size)` | — | Expand or shrink an existing block |
+| Free | `free(ptr)` | `delete ptr` | Return the block to the free pool |
+
+## Memory Leaks
+
+A **memory leak** occurs when heap memory is allocated but never freed, and all references to it are lost. The program has no way to reclaim it — that memory stays reserved for the process's entire lifetime.
+
+```c
+void leaky_function() {
+  int* data = malloc(1024 * sizeof(int));
+  // forgot to call free(data) — leak!
+  // 4 KB is now permanently lost until the process exits
+}
+```
+
+In long-running applications (servers, desktop apps), leaks accumulate over hours or days and can eventually crash the program or degrade system performance. Tools like **Valgrind** (C/C++) or **heap profilers** are used to detect leaks.
+
+## Fragmentation
+
+As the heap is used over time — allocating and freeing blocks of varying sizes — small gaps of unusable memory can scatter throughout the heap. This is called **fragmentation**.
+
+- **External fragmentation** — free memory exists in total, but it is split into non-contiguous chunks too small to satisfy a large request.
+- **Internal fragmentation** — the allocator hands out a slightly larger block than requested (for alignment), wasting the extra bytes.
+
+Modern allocators use strategies like **slab allocation**, **memory pools**, and **compaction** to reduce fragmentation's impact.
+
+## Garbage Collection
+
+Most modern languages automate heap management with a **garbage collector (GC)**. The GC periodically determines which heap objects are still reachable from the program and frees those that are not. This eliminates memory leaks and dangling pointers.
+
+Common GC strategies:
+
+- **Reference counting** (Python, Swift, Rust's `Rc<T>`) — each object tracks how many references point to it. When the count reaches zero, the object is freed immediately. Fast and predictable, but cannot handle **circular references** without extra help.
+- **Mark-and-sweep** (Java, Go, JavaScript's V8) — the GC periodically traverses all live objects starting from known roots, marks reachable ones, then sweeps and collects everything unmarked. Can handle cycles but introduces **pause times**.
+- **Generational GC** (JVM, .NET CLR, V8) — based on the observation that most objects die young. The heap is divided into generations; short-lived objects are collected frequently and cheaply, while long-lived objects are promoted and collected rarely.
+
+GC trades some **throughput** and introduces occasional **pause times** in exchange for automatic memory safety.
+
+## Heap vs Stack
+
+| | Stack | Heap |
+|---|---|---|
+| Allocation speed | Very fast (pointer arithmetic) | Slower (allocator search + bookkeeping) |
+| Size | Small (1–8 MB) | Large (limited by RAM) |
+| Lifetime | Tied to function scope | Manual or GC-managed |
+| Fragmentation | None | Possible |
+| Thread safety | Per-thread, no sharing | Shared — requires synchronization |
+| Programmer control | None needed | Full (manual) or none (GC) |
+
+For short-lived, small, fixed-size data, prefer the [stack](/programming/memory-management/stack). For large, dynamic, or data that must outlive a function, use the heap.
+
+## Heap in Different Languages
+
+- **C / C++**: Full manual control with `malloc`/`free` and `new`/`delete`. Maximum performance, maximum responsibility — every allocation must be explicitly freed.
+- **Rust**: The ownership and borrow-checker system enforces heap lifetimes at *compile time*. No GC, no leaks, no dangling pointers — the compiler proves correctness.
+- **Java / C#**: All objects live on the heap; primitive types live on the [stack](/programming/memory-management/stack). The GC handles everything automatically.
+- **Go**: Uses a tracing GC with low-latency tuning. The compiler performs *escape analysis* — if a value cannot escape the function that creates it, the compiler puts it on the stack automatically.
+- **JavaScript / Python**: Fully managed runtimes. The heap is completely invisible to the programmer; the GC runs in the background.
+
+## Related Topics
+
+- [Stack Memory](/programming/memory-management/stack) — automatic, scope-based memory for function execution
+- [Systems Programming](/programming/systems) — manual memory management at the OS level in depth
+- [Data Structures](/programming/data-structures) — how data structures are physically laid out in heap memory

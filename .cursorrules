@@ -1,0 +1,86 @@
+# Learn Anything — Cursor Rules
+
+## Core Principles
+
+### 1. Reusability is Non-Negotiable
+- NEVER embed a component inside a single page or section. Every UI element, visualization, or interactive component MUST live in the appropriate package (`packages/ui`, `packages/visualizations`, `packages/simulations`) before being used anywhere.
+- If you find yourself creating a component inside `apps/web/src/components/content/[specific-page]/`, stop and move it to a package.
+- Ask: "Could another topic use this?" If yes (almost always), make it a package component.
+
+### 2. Every Content Item MUST Have a Level
+- All topics, subtopics, and content items must have a `level` property set to one of: `"beginner"`, `"intermediate"`, or `"advanced"`.
+- This applies to: `NavTopic`, `NavArea` topics, content frontmatter, and any `_meta.json` files.
+- Use the shared `Level` type from `@learn-anything/content-config` — never define your own string level type.
+
+### 3. Package Structure Rules
+- `packages/ui` — pure UI primitives (Button, Badge, Slider, Card). No business logic. No content dependencies.
+- `packages/visualizations` — interactive visual components. Must accept data/config as props. Never hardcode domain data inside.
+- `packages/simulations` — pure TypeScript logic (no React). Returns step-by-step state snapshots. Must be framework-agnostic.
+- `packages/content-config` — types, schemas, and nav data. No UI imports.
+- `apps/web` — composes everything together. Contains page routing, layout, and app-specific wiring only.
+
+### 4. Component Design Rules
+- Interactive/visualization components must expose a `config` or `params` prop to allow external control (for AI chatbot integration later).
+- All visualization components must work inside a `Sandbox` wrapper that provides play/pause/step controls.
+- Components must not manage their own content data. Pass content as props.
+- Use Zustand stores for simulation state, not local useState (enables AI chatbot to control simulations later).
+
+### 5. Naming Conventions
+- Files: `PascalCase.tsx` for components, `camelCase.ts` for utilities.
+- Packages: kebab-case (`content-config`, `visualizations`).
+- Content directories: kebab-case (`binary-search`, `data-structures`).
+- Zustand stores: `use[Name]Store` (e.g., `useSimulationStore`).
+
+### 6. Routing Convention
+- All learning content follows: `/[area]/[topic]/[subtopic]`
+- Example: `/programming/algorithms/binary-search`
+- Area and topic IDs must match the `id` fields in `NAV_AREAS` and `_meta.json`.
+
+### 7. MDX Content Rules
+- All lesson content lives in `content/` as `.mdx` files, never inside `app/` or components.
+- Interactive components are embedded in MDX via the global component registry in `packages/content-config/src/mdx-components.tsx`.
+- Never import a visualization component directly in an MDX file — register it in the component registry.
+
+### 8. AI Chatbot Compatibility (future-proofing)
+- Simulation logic must be extractable — keep it in `packages/simulations` as pure functions.
+- Visualization components must accept an optional `externalControl` prop for programmatic control.
+- Store simulation state in Zustand so the chatbot can read and modify it.
+
+### 9. TypeScript Strictness
+- Strict mode enabled everywhere. No `any` types.
+- All props must be typed with explicit interfaces.
+- Prefer `type` over `interface` for simple prop shapes. Use `interface` for extensible structures.
+
+### 10. Styling Rules
+- Use Tailwind CSS utility classes only. No inline styles. No CSS modules in packages.
+- Use CSS custom properties (defined in `globals.css`) for theme values: `--background`, `--foreground`, `--border`, `--primary`, etc.
+- Do not hardcode color values — always use theme variables or Tailwind classes that map to them.
+
+### 11. Wikipedia-Style Cross-Linking
+- Every MDX article MUST link to related concepts mentioned in the text using standard markdown links: `[concept name](/area/topic/subtopic)`.
+- Links that point to other lessons within the platform are **concept links** — they are automatically styled differently from external links by the MDX renderer (internal = indigo underline, external = muted).
+- Do NOT create a custom `<ConceptLink>` component — the default `<a>` renderer in `LessonLayout.tsx` already handles internal vs external styling based on whether `href` starts with `/`.
+- Every article must include a **Related Topics** section at the bottom (`## Related Topics`) listing the most relevant other articles with their full paths.
+- When a concept is mentioned that has its own article, link it on **first meaningful mention** — not every occurrence.
+- Links must point to existing routes (`/[area]/[topic]/[subtopic]`). Do not link to pages that do not exist yet.
+
+### 12. MDX Frontmatter Requirements
+Every `.mdx` file in `content/` MUST include this frontmatter block:
+```yaml
+---
+title: Human-readable title
+description: One sentence summary shown in listings and meta tags.
+level: beginner | intermediate | advanced
+area: the-area-id        # must match a NavArea id in nav.ts
+topic: the-topic-id      # must match a NavTopic id in nav.ts
+---
+```
+Missing any of these fields will cause a TypeScript error at build time.
+
+### 13. Adding New Topics — Checklist
+When adding a new topic or subtopic, ALL of the following must be done together:
+1. Add the topic entry to `packages/content-config/src/nav.ts` with a `level` assigned.
+2. Create or update `content/[area]/[topic]/_meta.json` with the subtopic list.
+3. Create the `.mdx` file at `content/[area]/[topic]/[subtopic].mdx` with complete frontmatter.
+4. If the topic has subtopics, add the `subtopics` array to its `NavTopic` entry in `nav.ts`.
+5. Link to the new article from at least one existing related article (Wikipedia cross-link rule).

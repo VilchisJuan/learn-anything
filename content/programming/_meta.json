@@ -1,0 +1,6 @@
+{
+  "id": "programming",
+  "label": "Programming",
+  "description": "Algorithms, data structures, systems, and software design.",
+  "topics": ["algorithms", "data-structures", "systems", "design-patterns", "compilers"]
+}

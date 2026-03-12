@@ -1,0 +1,10 @@
+{
+  "id": "memory-management",
+  "label": "Memory Management",
+  "level": "intermediate",
+  "description": "Stack, heap, allocation strategies, and garbage collection.",
+  "subtopics": [
+    { "id": "stack", "label": "Stack Memory", "level": "intermediate" },
+    { "id": "heap", "label": "Heap Memory", "level": "intermediate" }
+  ]
+}

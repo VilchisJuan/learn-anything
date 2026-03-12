@@ -1,0 +1,14 @@
+{
+  "id": "algorithms",
+  "label": "Algorithms",
+  "level": "beginner",
+  "description": "Sorting, searching, and problem-solving strategies.",
+  "subtopics": [
+    { "id": "binary-search", "label": "Binary Search", "level": "beginner" },
+    { "id": "bubble-sort", "label": "Bubble Sort", "level": "beginner" },
+    { "id": "merge-sort", "label": "Merge Sort", "level": "intermediate" },
+    { "id": "quick-sort", "label": "Quick Sort", "level": "intermediate" },
+    { "id": "graph-traversal", "label": "Graph Traversal", "level": "intermediate" },
+    { "id": "dynamic-programming", "label": "Dynamic Programming", "level": "advanced" }
+  ]
+}
