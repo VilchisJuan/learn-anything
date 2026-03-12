@@ -333,69 +333,73 @@ export function StackVisualizer() {
 
       <div className="flex flex-col md:flex-row min-h-[320px] md:min-h-[420px]">
         {/* Stack visual */}
-        <div className="flex-1 min-h-[280px] flex flex-col justify-end px-3 md:px-6 py-5 relative">
-          <div className="absolute right-2 top-6 bottom-6 w-1.5 rounded-full bg-muted overflow-hidden">
-            <motion.div
-              className={`absolute bottom-0 left-0 right-0 rounded-full transition-colors duration-300 ${danger ? "bg-amber-500" : "bg-indigo-500"}`}
-              animate={{ height: `${(frames.length / MAX_VISIBLE) * 100}%` }}
-              transition={{ type: "spring", stiffness: 200, damping: 25 }}
-            />
+        <div className="flex-1 flex flex-col px-3 md:px-5 py-4">
+          {/* Stack Base at TOP (high address) */}
+          <div className="shrink-0 border-b-2 border-border/50 pb-1.5 mb-3 flex items-center gap-2">
+            <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Stack Base · High Address</span>
+            {danger && <span className="ml-auto text-[9px] text-amber-400">stack growing deep</span>}
           </div>
 
-          {frames.length === 0 && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-              Stack is empty — program exited
-            </motion.div>
-          )}
-
-          <div className="flex flex-col-reverse gap-1 md:gap-1.5 w-full max-w-sm mx-auto">
+          {/* Frames in natural order — main at top, newest (SP) at bottom */}
+          <div className="flex flex-col gap-1.5 flex-1">
             <AnimatePresence mode="popLayout">
+              {frames.length === 0 && (
+                <motion.div
+                  key="empty"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex-1 flex items-center justify-center text-muted-foreground text-sm py-10"
+                >
+                  Stack is empty — program exited
+                </motion.div>
+              )}
               {frames.map((frame, i) => {
-                const isTop      = i === frames.length - 1;
+                const isSP       = i === frames.length - 1;
                 const labelColor = LABEL_COLORS[i % LABEL_COLORS.length];
                 return (
                   <motion.div
                     key={frame.id}
                     layout
-                    initial={{ opacity: 0, y: -24, scale: 0.95 }}
+                    initial={{ opacity: 0, y: -16, scale: 0.97 }}
                     animate={{ opacity: 1, y: 0,   scale: 1    }}
-                    exit={{    opacity: 0, y: -24,  scale: 0.95 }}
-                    transition={{ type: "spring", stiffness: 300, damping: 28 }}
-                    className={`relative rounded-md border px-3 py-1.5 md:px-4 md:py-2.5 ${frame.color}`}
+                    exit={{    opacity: 0, y: -12,  scale: 0.96 }}
+                    transition={{ type: "spring", stiffness: 280, damping: 26 }}
+                    className={`rounded-md border px-3 py-2 ${frame.color} ${isSP ? "ring-1 ring-indigo-500/40" : ""}`}
                   >
-                    {isTop && (
-                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute -top-4 left-2 flex items-center gap-0.5 text-[9px] md:text-[10px] text-indigo-400 font-mono">
-                        <ChevronDown size={9} /> SP
-                      </motion.div>
-                    )}
-                    <div className="flex items-center justify-between gap-2">
-                      <span className={`text-[11px] md:text-sm font-mono font-semibold truncate ${labelColor}`}>{frame.functionName}</span>
-                      <div className="flex items-center gap-2 shrink-0">
+                    {/* Row 1: function name + locals */}
+                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                      <span className={`text-[11px] font-mono font-semibold shrink-0 ${labelColor}`}>{frame.functionName}</span>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 ml-auto">
                         {frame.locals.map((l) => (
-                          <span key={l.name} className="text-[10px] md:text-xs font-mono text-muted-foreground">
-                            <span className="text-foreground/60">{l.name}</span>
-                            <span className="text-foreground/40 mx-0.5">=</span>
-                            <span className="text-foreground">{l.value}</span>
+                          <span key={l.name} className="text-[10px] font-mono whitespace-nowrap">
+                            <span className="text-foreground/55">{l.name}</span>
+                            <span className="text-foreground/35 mx-px">=</span>
+                            <span className="text-foreground/90">{l.value}</span>
                           </span>
                         ))}
                         {frame.returnValue && (
-                          <span className="text-[10px] md:text-xs font-mono text-emerald-400">{frame.returnValue}</span>
+                          <span className="text-[10px] font-mono text-emerald-400 whitespace-nowrap">→ {frame.returnValue}</span>
                         )}
                       </div>
                     </div>
+                    {/* SP indicator inside active frame */}
+                    {isSP && (
+                      <div className="mt-1 flex items-center gap-0.5 text-[9px] text-indigo-400/70 font-mono">
+                        <ChevronDown size={8} /> SP · active frame
+                      </div>
+                    )}
                   </motion.div>
                 );
               })}
             </AnimatePresence>
-          </div>
 
-          {frames.length > 0 && (
-            <div className="max-w-sm w-full mx-auto mt-1.5">
-              <div className="border-t-2 border-border/60 pt-1.5 text-[10px] text-muted-foreground text-center tracking-wider uppercase">
-                Stack base (low memory address)
-              </div>
-            </div>
-          )}
+            {frames.length > 0 && (
+              <motion.div layout className="text-[9px] text-muted-foreground/50 text-center pt-1 uppercase tracking-wider">
+                Low address · stack grows ↓
+              </motion.div>
+            )}
+          </div>
         </div>
 
         {/* Right panel — language tabs + code + description */}
