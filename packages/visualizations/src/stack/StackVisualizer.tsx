@@ -393,9 +393,9 @@ export function StackVisualizer() {
         )}
       </div>
 
-      <div className="flex flex-col md:flex-row min-h-[320px] md:min-h-[420px]">
+      <div className="flex flex-col md:flex-row h-[420px] md:h-[460px]">
         {/* Stack visual */}
-        <div className="flex-1 flex flex-col px-3 md:px-5 py-4">
+        <div className="flex-1 flex flex-col px-3 md:px-5 py-4 min-h-0">
           {/* Stack Base at TOP (high address) */}
           <div className="shrink-0 border-b-2 border-border/50 pb-1.5 mb-2 flex items-center gap-2">
             <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Stack Base · High Address</span>
@@ -429,7 +429,7 @@ export function StackVisualizer() {
           </div>
 
           {/* Frames in natural order — main at top, newest (SP) at bottom */}
-          <div className="flex flex-col gap-1.5 flex-1">
+          <div className="flex flex-col gap-1.5 flex-1 overflow-y-auto">
             <AnimatePresence mode="popLayout">
               {frames.length === 0 && (
                 <motion.div
@@ -493,7 +493,7 @@ export function StackVisualizer() {
         </div>
 
         {/* Right panel — language tabs + code + description */}
-        <div className="w-full md:w-80 md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-[#0a0a0a] flex flex-col">
+        <div className="w-full md:w-80 md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-[#0a0a0a] flex flex-col min-h-0">
 
           {/* Language tabs */}
           <div className="flex border-b border-border shrink-0">

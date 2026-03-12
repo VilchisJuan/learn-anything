@@ -19,6 +19,7 @@ interface AnimBlock {
 
 interface AnimStep {
   description: string;
+  concept: string;
   event: "alloc" | "free" | "fail" | "info";
   blocks: AnimBlock[];
 }
@@ -26,26 +27,38 @@ interface AnimStep {
 // ─── Scenario ─────────────────────────────────────────────────────────────────
 
 const SCENARIO: AnimStep[] = [
-  { event: "info",  description: "The heap starts completely empty. Every cell is free and available.", blocks: [] },
-  { event: "alloc", description: "malloc(4) — we allocate a 4-cell integer array. The allocator places it at the lowest available address.",
+  {
+    event: "info", concept: "Dynamic Allocation · Heap Start",
+    description: "The heap starts completely empty. Every cell is free and available for allocation.",
+    blocks: [],
+  },
+  {
+    event: "alloc", concept: "malloc() · Sequential Placement",
+    description: "malloc(4) — allocate a 4-cell integer array. The allocator searches for the first free run of 4 cells and places it at the lowest available address.",
     blocks: [
       { id: "arr",  label: "arr",  startCell: 0,  size: 4, freed: false, colorClass: "bg-indigo-500/25 border-indigo-500/60", freeBgClass: "bg-indigo-500/10 border-indigo-500/20" },
     ],
   },
-  { event: "alloc", description: "malloc(2) — a linked list node gets 2 cells, placed immediately after the array.",
+  {
+    event: "alloc", concept: "malloc() · Sequential Placement",
+    description: "malloc(2) — a linked list node needs 2 cells. The allocator places it immediately after arr. Data persists beyond any function's scope — this is why the heap exists.",
     blocks: [
       { id: "arr",  label: "arr",  startCell: 0, size: 4, freed: false, colorClass: "bg-indigo-500/25 border-indigo-500/60", freeBgClass: "bg-indigo-500/10 border-indigo-500/20" },
       { id: "node", label: "node", startCell: 4, size: 2, freed: false, colorClass: "bg-violet-500/25 border-violet-500/60", freeBgClass: "bg-violet-500/10 border-violet-500/20" },
     ],
   },
-  { event: "alloc", description: "malloc(6) — a 6-cell text buffer is allocated next. Heap is filling up.",
+  {
+    event: "alloc", concept: "malloc() · Large Allocation",
+    description: "malloc(6) — a 6-cell text buffer allocated next. The heap can grow to fill all available RAM — unlike the stack's fixed 1–8 MB limit.",
     blocks: [
       { id: "arr",  label: "arr",  startCell: 0,  size: 4, freed: false, colorClass: "bg-indigo-500/25 border-indigo-500/60", freeBgClass: "bg-indigo-500/10 border-indigo-500/20" },
       { id: "node", label: "node", startCell: 4,  size: 2, freed: false, colorClass: "bg-violet-500/25 border-violet-500/60", freeBgClass: "bg-violet-500/10 border-violet-500/20" },
       { id: "buf",  label: "buf",  startCell: 6,  size: 6, freed: false, colorClass: "bg-blue-500/25 border-blue-500/60",    freeBgClass: "bg-blue-500/10 border-blue-500/20" },
     ],
   },
-  { event: "alloc", description: "malloc(4) — another 4-cell block for a matrix row.",
+  {
+    event: "alloc", concept: "malloc() · Multiple Live Allocations",
+    description: "malloc(4) — a fourth block for a matrix row. Multiple heap allocations coexist independently — unlike the stack where only the top frame is active.",
     blocks: [
       { id: "arr",  label: "arr",  startCell: 0,  size: 4, freed: false, colorClass: "bg-indigo-500/25 border-indigo-500/60", freeBgClass: "bg-indigo-500/10 border-indigo-500/20" },
       { id: "node", label: "node", startCell: 4,  size: 2, freed: false, colorClass: "bg-violet-500/25 border-violet-500/60", freeBgClass: "bg-violet-500/10 border-violet-500/20" },
@@ -53,7 +66,9 @@ const SCENARIO: AnimStep[] = [
       { id: "row",  label: "row",  startCell: 12, size: 4, freed: false, colorClass: "bg-cyan-500/25 border-cyan-500/60",    freeBgClass: "bg-cyan-500/10 border-cyan-500/20" },
     ],
   },
-  { event: "free",  description: "free(node) — we're done with the node. It's freed, leaving a 2-cell hole between arr and buf.",
+  {
+    event: "free", concept: "free() · Memory Leak Prevention",
+    description: "free(node) — node is no longer needed. Calling free() returns the 2 cells to the allocator. Forgetting this call would be a memory leak — those 2 cells would be lost forever.",
     blocks: [
       { id: "arr",  label: "arr",  startCell: 0,  size: 4, freed: false, colorClass: "bg-indigo-500/25 border-indigo-500/60", freeBgClass: "bg-indigo-500/10 border-indigo-500/20" },
       { id: "node", label: "node", startCell: 4,  size: 2, freed: true,  colorClass: "bg-violet-500/25 border-violet-500/60", freeBgClass: "bg-violet-500/10 border-violet-500/20" },
@@ -61,7 +76,9 @@ const SCENARIO: AnimStep[] = [
       { id: "row",  label: "row",  startCell: 12, size: 4, freed: false, colorClass: "bg-cyan-500/25 border-cyan-500/60",    freeBgClass: "bg-cyan-500/10 border-cyan-500/20" },
     ],
   },
-  { event: "free",  description: "free(buf) — the buffer is freed too. Now there's a 8-cell gap (cells 4–11) in the middle of the heap.",
+  {
+    event: "free", concept: "free() · Fragmentation Begins",
+    description: "free(buf) — buf is freed too. Now cells 4–11 are free but split across two non-adjacent holes. This is how external fragmentation forms.",
     blocks: [
       { id: "arr",  label: "arr",  startCell: 0,  size: 4, freed: false, colorClass: "bg-indigo-500/25 border-indigo-500/60", freeBgClass: "bg-indigo-500/10 border-indigo-500/20" },
       { id: "node", label: "node", startCell: 4,  size: 2, freed: true,  colorClass: "bg-violet-500/25 border-violet-500/60", freeBgClass: "bg-violet-500/10 border-violet-500/20" },
@@ -69,7 +86,9 @@ const SCENARIO: AnimStep[] = [
       { id: "row",  label: "row",  startCell: 12, size: 4, freed: false, colorClass: "bg-cyan-500/25 border-cyan-500/60",    freeBgClass: "bg-cyan-500/10 border-cyan-500/20" },
     ],
   },
-  { event: "alloc", description: "malloc(2) — a small allocation reuses part of the freed gap. The allocator places it at cell 4, the first available slot.",
+  {
+    event: "alloc", concept: "Allocator · Reuses Freed Block",
+    description: "malloc(2) — a small allocation fits perfectly into the first freed hole at cell 4. The allocator reuses freed space. GC languages do this automatically.",
     blocks: [
       { id: "arr",  label: "arr",  startCell: 0,  size: 4, freed: false, colorClass: "bg-indigo-500/25 border-indigo-500/60", freeBgClass: "bg-indigo-500/10 border-indigo-500/20" },
       { id: "ptr",  label: "ptr",  startCell: 4,  size: 2, freed: false, colorClass: "bg-teal-500/25 border-teal-500/60",     freeBgClass: "bg-teal-500/10 border-teal-500/20" },
@@ -77,7 +96,9 @@ const SCENARIO: AnimStep[] = [
       { id: "row",  label: "row",  startCell: 12, size: 4, freed: false, colorClass: "bg-cyan-500/25 border-cyan-500/60",    freeBgClass: "bg-cyan-500/10 border-cyan-500/20" },
     ],
   },
-  { event: "fail",  description: "malloc(10) — we need 10 contiguous cells. Total free = 6+8 = 14 cells, but no single contiguous run of 10 exists. ALLOCATION FAILS.",
+  {
+    event: "fail", concept: "External Fragmentation · Allocation Fails",
+    description: "malloc(10) — 10 contiguous cells needed. Total free = 6+8 = 14 cells, but no single contiguous run of 10 exists. ALLOCATION FAILS despite having enough total free memory.",
     blocks: [
       { id: "arr",  label: "arr",  startCell: 0,  size: 4, freed: false, colorClass: "bg-indigo-500/25 border-indigo-500/60", freeBgClass: "bg-indigo-500/10 border-indigo-500/20" },
       { id: "ptr",  label: "ptr",  startCell: 4,  size: 2, freed: false, colorClass: "bg-teal-500/25 border-teal-500/60",     freeBgClass: "bg-teal-500/10 border-teal-500/20" },
@@ -85,7 +106,9 @@ const SCENARIO: AnimStep[] = [
       { id: "row",  label: "row",  startCell: 12, size: 4, freed: false, colorClass: "bg-cyan-500/25 border-cyan-500/60",    freeBgClass: "bg-cyan-500/10 border-cyan-500/20" },
     ],
   },
-  { event: "info",  description: "This is external fragmentation. Enough total memory is free but it's not contiguous. Modern allocators, GCs, and compacting runtimes work hard to prevent this.",
+  {
+    event: "info", concept: "External Fragmentation · GC Compaction",
+    description: "This is external fragmentation. Modern GCs (Java, Go, .NET) use compaction to move live objects together, eliminating holes. Manual allocators use slab allocation and memory pools instead.",
     blocks: [
       { id: "arr",  label: "arr",  startCell: 0,  size: 4, freed: false, colorClass: "bg-indigo-500/25 border-indigo-500/60", freeBgClass: "bg-indigo-500/10 border-indigo-500/20" },
       { id: "ptr",  label: "ptr",  startCell: 4,  size: 2, freed: false, colorClass: "bg-teal-500/25 border-teal-500/60",     freeBgClass: "bg-teal-500/10 border-teal-500/20" },
@@ -498,7 +521,7 @@ export function HeapAnimation() {
             <CodePanel lang={lang} step={step} />
           </div>
 
-          {/* Description + step dots */}
+          {/* Description + concept + step dots */}
           <div className="p-5 flex flex-col gap-4 md:flex-1">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">What's happening</p>
@@ -515,6 +538,17 @@ export function HeapAnimation() {
                 </motion.p>
               </AnimatePresence>
             </div>
+
+            <AnimatePresence mode="wait">
+              <motion.span
+                key={current.concept}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="inline-flex items-center self-start px-2 py-0.5 rounded text-[10px] font-mono border text-indigo-300 border-indigo-400/20 bg-indigo-400/8"
+              >
+                {current.concept}
+              </motion.span>
+            </AnimatePresence>
 
             <div className="md:mt-auto flex flex-wrap gap-1">
               {SCENARIO.map((_, i) => (

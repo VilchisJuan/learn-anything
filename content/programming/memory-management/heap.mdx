@@ -33,16 +33,6 @@ int main() {
 
 ## How Heap Allocation Works
 
-<HeapAnimation />
-
-Watch the animation above to follow a real allocation sequence — from an empty heap through several mallocs and frees, ending with a fragmentation failure that makes an allocation impossible despite enough total free memory.
-
-## Try It Yourself
-
-Now experiment freely. Allocate blocks of any size and name, free them in any order, and observe how the memory map changes. The **Demo: fragmentation** button runs a preset scenario you can then continue from.
-
-<HeapVisualizer />
-
 When you request heap memory, the **memory allocator** (part of the standard library or runtime) searches a pool of free memory for a block large enough to satisfy the request, marks it as used, and returns a pointer to it.
 
 Common allocator operations:
@@ -108,6 +98,18 @@ For short-lived, small, fixed-size data, prefer the [stack](/programming/memory-
 - **Java / C#**: All objects live on the heap; primitive types live on the [stack](/programming/memory-management/stack). The GC handles everything automatically.
 - **Go**: Uses a tracing GC with low-latency tuning. The compiler performs *escape analysis* — if a value cannot escape the function that creates it, the compiler puts it on the stack automatically.
 - **JavaScript / Python**: Fully managed runtimes. The heap is completely invisible to the programmer; the GC runs in the background.
+
+## See It in Action
+
+Step through the animation to watch every concept from above play out: allocations placing blocks at the lowest available address, `free()` punching holes, a small reuse fitting into a freed gap, and finally a large allocation failing because of **external fragmentation** — even though enough total free memory exists.
+
+<HeapAnimation />
+
+## Try It Yourself
+
+Allocate blocks of any size and name, free them in any order, and watch the memory map change. Hit **Demo: fragmentation** to run a preset scenario, then continue experimenting from there.
+
+<HeapVisualizer />
 
 ## Related Topics
 
