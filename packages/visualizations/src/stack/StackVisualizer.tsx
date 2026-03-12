@@ -333,7 +333,7 @@ export function StackVisualizer() {
 
       <div className="flex flex-col md:flex-row min-h-[320px] md:min-h-[420px]">
         {/* Stack visual */}
-        <div className="flex-1 flex flex-col justify-end px-4 md:px-6 py-6 relative">
+        <div className="flex-1 min-h-[280px] flex flex-col justify-end px-3 md:px-6 py-5 relative">
           <div className="absolute right-2 top-6 bottom-6 w-1.5 rounded-full bg-muted overflow-hidden">
             <motion.div
               className={`absolute bottom-0 left-0 right-0 rounded-full transition-colors duration-300 ${danger ? "bg-amber-500" : "bg-indigo-500"}`}
@@ -348,7 +348,7 @@ export function StackVisualizer() {
             </motion.div>
           )}
 
-          <div className="flex flex-col-reverse gap-1.5 max-w-sm w-full mx-auto">
+          <div className="flex flex-col-reverse gap-1 md:gap-1.5 w-full max-w-sm mx-auto">
             <AnimatePresence mode="popLayout">
               {frames.map((frame, i) => {
                 const isTop      = i === frames.length - 1;
@@ -361,25 +361,25 @@ export function StackVisualizer() {
                     animate={{ opacity: 1, y: 0,   scale: 1    }}
                     exit={{    opacity: 0, y: -24,  scale: 0.95 }}
                     transition={{ type: "spring", stiffness: 300, damping: 28 }}
-                    className={`relative rounded-lg border px-4 py-3 ${frame.color}`}
+                    className={`relative rounded-md border px-3 py-1.5 md:px-4 md:py-2.5 ${frame.color}`}
                   >
                     {isTop && (
-                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute -top-5 left-3 flex items-center gap-1 text-[10px] text-indigo-400 font-mono">
-                        <ChevronDown size={10} /> SP (stack pointer)
+                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute -top-4 left-2 flex items-center gap-0.5 text-[9px] md:text-[10px] text-indigo-400 font-mono">
+                        <ChevronDown size={9} /> SP
                       </motion.div>
                     )}
-                    <div className="flex items-center justify-between gap-4">
-                      <span className={`text-sm font-mono font-semibold ${labelColor}`}>{frame.functionName}</span>
-                      <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`text-[11px] md:text-sm font-mono font-semibold truncate ${labelColor}`}>{frame.functionName}</span>
+                      <div className="flex items-center gap-2 shrink-0">
                         {frame.locals.map((l) => (
-                          <span key={l.name} className="text-xs font-mono text-muted-foreground">
+                          <span key={l.name} className="text-[10px] md:text-xs font-mono text-muted-foreground">
                             <span className="text-foreground/60">{l.name}</span>
                             <span className="text-foreground/40 mx-0.5">=</span>
                             <span className="text-foreground">{l.value}</span>
                           </span>
                         ))}
                         {frame.returnValue && (
-                          <span className="text-xs font-mono text-emerald-400">{frame.returnValue}</span>
+                          <span className="text-[10px] md:text-xs font-mono text-emerald-400">{frame.returnValue}</span>
                         )}
                       </div>
                     </div>
