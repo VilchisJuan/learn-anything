@@ -1,3 +1,10 @@
+export { HiraganaChart } from "./japanese/HiraganaChart";
+export { KatakanaChart } from "./japanese/KatakanaChart";
+export { KanaQuiz } from "./japanese/KanaQuiz";
+export { ParticleExercise } from "./japanese/ParticleExercise";
+export { KanjiFlashcards } from "./japanese/KanjiFlashcards";
+export { ConjugationTable } from "./japanese/ConjugationTable";
+export { JlptQuiz } from "./japanese/JlptQuiz";
 export { StackVisualizer, useStackStore } from "./stack/StackVisualizer";
 export { StackExercise, useStackExerciseStore } from "./stack/StackExercise";
 export { HeapVisualizer, useHeapStore } from "./heap/HeapVisualizer";

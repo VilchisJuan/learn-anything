@@ -12,16 +12,18 @@ import {
   ChevronRight,
   BookOpen,
   FlaskConical,
+  Languages,
 } from "lucide-react";
 import { LevelBadge } from "@/components/ui/LevelBadge";
 import { NAV_AREAS } from "@learn-anything/content-config";
-import type { NavArea, NavTopic } from "@learn-anything/content-config";
+import type { NavArea, NavTopic, NavLevel } from "@learn-anything/content-config";
 
 const AREA_ICONS: Record<string, React.ReactNode> = {
   programming: <Code2 size={16} />,
   nature: <Leaf size={16} />,
   physics: <Atom size={16} />,
   "cognitive-science": <Brain size={16} />,
+  languages: <Languages size={16} />,
 };
 
 interface SidebarProps {
@@ -213,10 +215,11 @@ function TopicItem({ areaId, topic, onLinkClick }: TopicItemProps) {
   );
 
   const hasSubtopics = topic.subtopics && topic.subtopics.length > 0;
+  const hasLevels = topic.levels && topic.levels.length > 0;
   const topicPath = `/${areaId}/${topic.id}`;
   const isActive = pathname === topicPath;
 
-  if (hasSubtopics) {
+  if (hasSubtopics || hasLevels) {
     return (
       <li>
         <button
@@ -247,7 +250,7 @@ function TopicItem({ areaId, topic, onLinkClick }: TopicItemProps) {
               transition={{ duration: 0.15, ease: "easeInOut" }}
               className="overflow-hidden ml-2 pl-3 border-l border-border/60 mt-0.5 space-y-0.5"
             >
-              {topic.subtopics!.map((sub) => {
+              {hasSubtopics && topic.subtopics!.map((sub) => {
                 const subPath = `/${areaId}/${topic.id}/${sub.id}`;
                 const isSubActive = pathname === subPath;
                 return (
@@ -267,6 +270,15 @@ function TopicItem({ areaId, topic, onLinkClick }: TopicItemProps) {
                   </li>
                 );
               })}
+              {hasLevels && topic.levels!.map((lv) => (
+                <LevelItem
+                  key={lv.id}
+                  areaId={areaId}
+                  topicId={topic.id}
+                  navLevel={lv}
+                  onLinkClick={onLinkClick}
+                />
+              ))}
             </motion.ul>
           )}
         </AnimatePresence>
@@ -288,6 +300,70 @@ function TopicItem({ areaId, topic, onLinkClick }: TopicItemProps) {
         <span className="flex-1">{topic.label}</span>
         <LevelBadge level={topic.level} compact />
       </Link>
+    </li>
+  );
+}
+
+interface LevelItemProps {
+  areaId: string;
+  topicId: string;
+  navLevel: NavLevel;
+  onLinkClick: () => void;
+}
+
+function LevelItem({ areaId, topicId, navLevel, onLinkClick }: LevelItemProps) {
+  const pathname = usePathname();
+  const levelPath = `/${areaId}/${topicId}/${navLevel.id}`;
+  const [expanded, setExpanded] = useState(pathname.includes(levelPath));
+
+  return (
+    <li>
+      <button
+        onClick={() => setExpanded((p) => !p)}
+        className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-xs transition-colors text-muted-foreground hover:text-foreground hover:bg-accent/60"
+      >
+        <LevelBadge level={navLevel.level} compact />
+        <span className="flex-1 text-left font-medium">{navLevel.label}</span>
+        <motion.span
+          animate={{ rotate: expanded ? 90 : 0 }}
+          transition={{ duration: 0.12 }}
+          className="text-muted-foreground shrink-0"
+        >
+          <ChevronRight size={11} />
+        </motion.span>
+      </button>
+
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.ul
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15, ease: "easeInOut" }}
+            className="overflow-hidden ml-2 pl-3 border-l border-border/40 mt-0.5 space-y-0.5"
+          >
+            {navLevel.subtopics.map((sub) => {
+              const subPath = `${levelPath}/${sub.id}`;
+              const isSubActive = pathname === subPath;
+              return (
+                <li key={sub.id}>
+                  <Link
+                    href={subPath}
+                    onClick={onLinkClick}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs transition-colors ${
+                      isSubActive
+                        ? "text-primary font-medium bg-primary/10"
+                        : "text-muted-foreground hover:text-foreground hover:bg-accent/60"
+                    }`}
+                  >
+                    <span className="flex-1">{sub.label}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </motion.ul>
+        )}
+      </AnimatePresence>
     </li>
   );
 }

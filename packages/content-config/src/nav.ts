@@ -6,13 +6,23 @@ export interface NavSubtopic {
   level: Level;
 }
 
+/** A JLPT level (N5, N4…) or any sub-grouping inside a topic that adds a 4th routing segment */
+export interface NavLevel {
+  id: string;    // e.g. "n5"
+  label: string; // e.g. "N5 — Beginner"
+  level: Level;
+  description?: string;
+  subtopics: NavSubtopic[];
+}
+
 export interface NavTopic {
   id: string;
   label: string;
   level: Level;
   description?: string;
-  group?: string; // sidebar display grouping within an area (e.g. "Animals", "Plants")
-  subtopics?: NavSubtopic[];
+  group?: string;
+  subtopics?: NavSubtopic[]; // 3-level: /area/topic/subtopic
+  levels?: NavLevel[];       // 4-level: /area/topic/level/subtopic
 }
 
 export interface NavArea {
@@ -36,6 +46,41 @@ export const NAV_AREAS: NavArea[] = [
         subtopics: [
           { id: "stack", label: "Stack Memory", level: "intermediate" },
           { id: "heap", label: "Heap Memory", level: "intermediate" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "languages",
+    label: "Languages",
+    description: "Learn world languages with structured lessons, exercises, and interactive tools.",
+    topics: [
+      {
+        id: "japanese",
+        label: "Japanese",
+        level: "n5",
+        group: "East Asian",
+        description: "Master Japanese from the ground up — kana, kanji, grammar, and vocabulary.",
+        levels: [
+          {
+            id: "n5",
+            label: "N5 — Beginner",
+            level: "n5",
+            description: "Foundations: hiragana, katakana, basic grammar, ~800 words.",
+            subtopics: [
+              { id: "hiragana", label: "Hiragana", level: "n5" },
+              { id: "katakana", label: "Katakana", level: "n5" },
+              { id: "numbers", label: "Numbers & Counting", level: "n5" },
+              { id: "greetings", label: "Greetings & Phrases", level: "n5" },
+              { id: "particles", label: "Essential Particles", level: "n5" },
+              { id: "sentence-structure", label: "Sentence Structure", level: "n5" },
+              { id: "verbs", label: "Verbs & Conjugation", level: "n5" },
+              { id: "adjectives", label: "Adjectives", level: "n5" },
+              { id: "basic-kanji", label: "Basic Kanji", level: "n5" },
+              { id: "vocabulary", label: "Core Vocabulary", level: "n5" },
+              { id: "n5-quiz", label: "N5 Practice Quiz", level: "n5" },
+            ],
+          },
         ],
       },
     ],

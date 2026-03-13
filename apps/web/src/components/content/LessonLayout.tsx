@@ -1,11 +1,14 @@
 import { MDXRemote } from "next-mdx-remote/rsc";
 import rehypeSlug from "rehype-slug";
 import rehypePrettyCode from "rehype-pretty-code";
+import remarkGfm from "remark-gfm";
 import Link from "next/link";
 import type { LessonData } from "@/lib/mdx";
 import { LevelBadge } from "@/components/ui/LevelBadge";
 import { TableOfContents } from "@/components/content/TableOfContents";
 import {
+  HiraganaChart, KatakanaChart, KanaQuiz, ParticleExercise,
+  KanjiFlashcards, ConjugationTable, JlptQuiz,
   StackVisualizer, StackExercise, HeapVisualizer, HeapAnimation,
   AmmoniteAnatomyDiagram, ShellGrowthAnimation, GeologicTimeline, SutureDiagram, ExtinctionEvent,
   AmmoniteSizeComparison, CephalopodTree, DepthRangeChart, PreservationTypes,
@@ -150,6 +153,13 @@ const MDX_COMPONENTS = {
     </blockquote>
   ),
   hr: () => <hr className="border-border my-8" />,
+  HiraganaChart: () => <HiraganaChart />,
+  KatakanaChart: () => <KatakanaChart />,
+  KanaQuiz: () => <KanaQuiz />,
+  ParticleExercise: () => <ParticleExercise />,
+  KanjiFlashcards: () => <KanjiFlashcards />,
+  ConjugationTable: () => <ConjugationTable />,
+  JlptQuiz: () => <JlptQuiz />,
   StackVisualizer: () => <StackVisualizer />,
   StackExercise: () => <StackExercise />,
   HeapVisualizer: () => <HeapVisualizer />,
@@ -183,6 +193,12 @@ export function LessonLayout({ lesson }: LessonLayoutProps) {
             <span className="capitalize">{frontmatter.area}</span>
             <span>/</span>
             <span className="capitalize">{frontmatter.topic.replace(/-/g, " ")}</span>
+            {frontmatter.sublevel && (
+              <>
+                <span>/</span>
+                <span className="uppercase font-semibold text-blue-400">{frontmatter.sublevel}</span>
+              </>
+            )}
           </div>
           <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-3 tracking-tight">
             {frontmatter.title}
@@ -200,7 +216,8 @@ export function LessonLayout({ lesson }: LessonLayoutProps) {
             components={MDX_COMPONENTS}
             options={{
               mdxOptions: {
-                rehypePlugins: [
+                remarkPlugins: [remarkGfm],
+              rehypePlugins: [
                   [rehypePrettyCode, { theme: "github-dark" }],
                   rehypeSlug,
                 ],

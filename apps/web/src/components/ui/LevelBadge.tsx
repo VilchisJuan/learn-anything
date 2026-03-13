@@ -16,6 +16,31 @@ const LEVEL_CONFIG: Record<Level, { label: string; className: string; dot: strin
     className: "text-rose-400 bg-rose-400/10 border-rose-400/20",
     dot: "bg-rose-400",
   },
+  n5: {
+    label: "JLPT N5",
+    className: "text-blue-400 bg-blue-400/10 border-blue-400/20",
+    dot: "bg-blue-400",
+  },
+  n4: {
+    label: "JLPT N4",
+    className: "text-cyan-400 bg-cyan-400/10 border-cyan-400/20",
+    dot: "bg-cyan-400",
+  },
+  n3: {
+    label: "JLPT N3",
+    className: "text-violet-400 bg-violet-400/10 border-violet-400/20",
+    dot: "bg-violet-400",
+  },
+  n2: {
+    label: "JLPT N2",
+    className: "text-orange-400 bg-orange-400/10 border-orange-400/20",
+    dot: "bg-orange-400",
+  },
+  n1: {
+    label: "JLPT N1",
+    className: "text-red-400 bg-red-400/10 border-red-400/20",
+    dot: "bg-red-400",
+  },
 };
 
 interface LevelBadgeProps {

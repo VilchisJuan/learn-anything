@@ -12,6 +12,7 @@ export interface LessonFrontmatter {
   level: Level;
   area: string;
   topic: string;
+  sublevel?: string; // e.g. "n5" for 4-level routes
 }
 
 export interface TocEntry {
@@ -45,21 +46,29 @@ function extractToc(mdx: string): TocEntry[] {
   return toc;
 }
 
+/** Load a lesson from /content/{area}/{topic}/{subtopic}.mdx (3-level route) */
 export function getLessonData(
   area: string,
   topic: string,
-  subtopic: string
+  subtopic: string,
 ): LessonData | null {
   const filePath = path.join(CONTENT_ROOT, area, topic, `${subtopic}.mdx`);
-
   if (!fs.existsSync(filePath)) return null;
-
   const raw = fs.readFileSync(filePath, "utf-8");
   const { data, content } = matter(raw);
+  return { frontmatter: data as LessonFrontmatter, source: content, toc: extractToc(content) };
+}
 
-  return {
-    frontmatter: data as LessonFrontmatter,
-    source: content,
-    toc: extractToc(content),
-  };
+/** Load a lesson from /content/{area}/{topic}/{sublevel}/{subtopic}.mdx (4-level route) */
+export function getLessonDataDeep(
+  area: string,
+  topic: string,
+  sublevel: string,
+  subtopic: string,
+): LessonData | null {
+  const filePath = path.join(CONTENT_ROOT, area, topic, sublevel, `${subtopic}.mdx`);
+  if (!fs.existsSync(filePath)) return null;
+  const raw = fs.readFileSync(filePath, "utf-8");
+  const { data, content } = matter(raw);
+  return { frontmatter: data as LessonFrontmatter, source: content, toc: extractToc(content) };
 }
