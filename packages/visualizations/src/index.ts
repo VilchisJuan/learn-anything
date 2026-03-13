@@ -15,3 +15,4 @@ export { ShellParameterExplorer } from "./ammonites/ShellParameterExplorer";
 export { SpeciesGallery } from "./ammonites/SpeciesGallery";
 export { HeteromorphGallery } from "./ammonites/HeteromorphGallery";
 export { AmmoniteQuiz } from "./ammonites/AmmoniteQuiz";
+export { AmmoniteTimeLapse } from "./ammonites/AmmoniteTimeLapse";

@@ -68,7 +68,7 @@ const HUMAN_HEIGHT_CM = 175;
 function layout() {
   // Use a minimum visual radius so tiny ones are still visible
   const minR = 4;
-  const gap = 14;
+  const gap = 70;
   let x = 16;
   return AMMONITES.map((sp) => {
     const r = Math.max(minR, (sp.diameterCm / 2) * SCALE);
@@ -131,14 +131,6 @@ export function AmmoniteSizeComparison() {
           <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} width={SVG_W} height={SVG_H} style={{ minWidth: SVG_W }}>
             {/* Ground line */}
             <line x1={0} y1={BASELINE} x2={SVG_W} y2={BASELINE} stroke="#1e293b" strokeWidth="1" />
-
-            {/* Scale bar */}
-            <g>
-              <line x1={10} y1={SVG_H - 8} x2={10 + 100 * SCALE} y2={SVG_H - 8} stroke="#334155" strokeWidth="1" />
-              <line x1={10} y1={SVG_H - 12} x2={10} y2={SVG_H - 4} stroke="#334155" strokeWidth="1" />
-              <line x1={10 + 100 * SCALE} y1={SVG_H - 12} x2={10 + 100 * SCALE} y2={SVG_H - 4} stroke="#334155" strokeWidth="1" />
-              <text x={10 + 50 * SCALE} y={SVG_H - 1} fill="#475569" fontSize="8" textAnchor="middle" fontFamily="monospace">100 cm</text>
-            </g>
 
             {/* Human silhouette */}
             <HumanSilhouette x={HUMAN_X} h={HUMAN_H} />

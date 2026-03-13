@@ -8,7 +8,7 @@ import {
   StackVisualizer, StackExercise, HeapVisualizer, HeapAnimation,
   AmmoniteAnatomyDiagram, ShellGrowthAnimation, GeologicTimeline, SutureDiagram, ExtinctionEvent,
   AmmoniteSizeComparison, CephalopodTree, DepthRangeChart, PreservationTypes,
-  ShellParameterExplorer, SpeciesGallery, HeteromorphGallery, AmmoniteQuiz,
+  ShellParameterExplorer, SpeciesGallery, HeteromorphGallery, AmmoniteQuiz, AmmoniteTimeLapse,
 } from "@learn-anything/visualizations";
 
 interface LessonLayoutProps {
@@ -149,6 +149,7 @@ const MDX_COMPONENTS = {
   SpeciesGallery: () => <SpeciesGallery />,
   HeteromorphGallery: () => <HeteromorphGallery />,
   AmmoniteQuiz: () => <AmmoniteQuiz />,
+  AmmoniteTimeLapse: () => <AmmoniteTimeLapse />,
 };
 
 export function LessonLayout({ lesson }: LessonLayoutProps) {
