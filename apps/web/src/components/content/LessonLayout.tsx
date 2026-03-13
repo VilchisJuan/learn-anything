@@ -4,7 +4,12 @@ import Link from "next/link";
 import type { LessonData } from "@/lib/mdx";
 import { LevelBadge } from "@/components/ui/LevelBadge";
 import { TableOfContents } from "@/components/content/TableOfContents";
-import { StackVisualizer, StackExercise, HeapVisualizer, HeapAnimation } from "@learn-anything/visualizations";
+import {
+  StackVisualizer, StackExercise, HeapVisualizer, HeapAnimation,
+  AmmoniteAnatomyDiagram, ShellGrowthAnimation, GeologicTimeline, SutureDiagram, ExtinctionEvent,
+  AmmoniteSizeComparison, CephalopodTree, DepthRangeChart, PreservationTypes,
+  ShellParameterExplorer, SpeciesGallery, HeteromorphGallery, AmmoniteQuiz,
+} from "@learn-anything/visualizations";
 
 interface LessonLayoutProps {
   lesson: LessonData;
@@ -131,6 +136,19 @@ const MDX_COMPONENTS = {
   StackExercise: () => <StackExercise />,
   HeapVisualizer: () => <HeapVisualizer />,
   HeapAnimation: () => <HeapAnimation />,
+  AmmoniteAnatomyDiagram: () => <AmmoniteAnatomyDiagram />,
+  ShellGrowthAnimation: () => <ShellGrowthAnimation />,
+  GeologicTimeline: () => <GeologicTimeline />,
+  SutureDiagram: () => <SutureDiagram />,
+  ExtinctionEvent: () => <ExtinctionEvent />,
+  AmmoniteSizeComparison: () => <AmmoniteSizeComparison />,
+  CephalopodTree: () => <CephalopodTree />,
+  DepthRangeChart: () => <DepthRangeChart />,
+  PreservationTypes: () => <PreservationTypes />,
+  ShellParameterExplorer: () => <ShellParameterExplorer />,
+  SpeciesGallery: () => <SpeciesGallery />,
+  HeteromorphGallery: () => <HeteromorphGallery />,
+  AmmoniteQuiz: () => <AmmoniteQuiz />,
 };
 
 export function LessonLayout({ lesson }: LessonLayoutProps) {

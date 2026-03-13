@@ -1,0 +1,101 @@
+---
+title: Shell Geometry
+description: The mathematics of the ammonite shell — logarithmic spirals, the golden ratio, whorl expansion, and why suture complexity is an engineering solution.
+level: intermediate
+area: nature
+topic: ammonites
+---
+
+## A Shell Described by a Single Equation
+
+The ammonite shell is not just beautiful — it is **mathematically precise**. Every ammonite shell, from a tiny 5 mm Jurassic species to a 2-metre Cretaceous giant, follows the same fundamental equation:
+
+```
+r = a · e^(b·θ)
+```
+
+Where:
+- `r` is the distance from the center (radius)
+- `θ` (theta) is the angle of rotation
+- `a` is the starting radius (tiny, set by the embryo)
+- `b` controls how fast the shell expands per revolution
+- `e` is Euler's number (≈ 2.718)
+
+This is the **logarithmic spiral** — also called the equiangular spiral. Its key property: **the angle between the tangent and any radius is constant**. The shell looks the same at every scale. Zoom in on an ammonite cross-section and the inner whorls look like a miniature version of the outer whorls.
+
+## Watching the Shell Grow
+
+Each ammonite chamber was grown sequentially, from the tiny protoconch at the center outward. Watch the process:
+
+<ShellGrowthAnimation />
+
+## The Whorl Expansion Ratio
+
+The single most important measurement of an ammonite's coiling is the **Whorl Expansion Ratio (WER)** — how much larger each new whorl is compared to the previous one.
+
+```
+WER = e^(2π·b)
+```
+
+This directly determines the shell's shape:
+
+| WER | Shell shape | Example |
+|-----|------------|---------|
+| ~1.2 | Very tightly coiled, almost tube-like | Some Liassic ammonites |
+| ~2.0 | Moderately coiled, whorls overlap | *Dactylioceras* |
+| ~3.5 | Openly coiled, wide umbilicus | *Parkinsonia* |
+| ~6.0 | Very widely coiled, evolute | Some goniatites |
+| Varies | **Heteromorphs** — uncoiled or bizarre shapes | *Nipponites*, *Hamites* |
+
+For the animation above, WER ≈ 3.97 — each revolution is about 4× larger than the previous one.
+
+## The Golden Ratio Connection
+
+You may have heard that the nautilus shell demonstrates the **golden ratio** (φ ≈ 1.618). This is a popular claim — but it's largely a myth.
+
+The golden ratio spiral is a special case of the logarithmic spiral where the expansion factor after a quarter turn equals φ. Most ammonite and nautilus shells do NOT have this specific ratio. Their expansion ratios vary widely between species.
+
+What IS true: the logarithmic spiral is a mathematical ideal that appears throughout nature — in sunflower seed arrangements, galaxy arms, and hurricane spiral bands — because it represents **optimal growth**: every part of the structure maintains the same proportions as the whole. The ammonite discovered this solution independently, using pure biology.
+
+## Suture Geometry — Engineering by Evolution
+
+The most geometrically complex part of an ammonite is not the outer coil — it's the **suture lines**: the traces left where each septum meets the outer shell wall.
+
+<SutureDiagram />
+
+### Why complexity increases with depth
+
+The septa needed to resist the crushing force of water pressure from outside the shell. A flat septum would behave like a flat panel under compression — it would buckle and fail. But a deeply folded septum distributes stress across a much larger surface area, dramatically increasing pressure resistance.
+
+The mathematical relationship is analogous to **thin shell theory** in structural engineering. More folds = more surface area per unit of shell material = greater pressure resistance. This allowed later ammonites to colonize deeper water than their ancestors.
+
+### Fractal geometry in nature
+
+The most complex ammonitic sutures approach **fractal** geometry — patterns that repeat self-similarly at multiple scales. This emerges from a developmental process: a simple fold at one scale creates stress concentrations at its tips, which in turn trigger sub-folds, which trigger sub-sub-folds.
+
+The result is a biological structure that achieves near-maximum structural efficiency for minimum material — an engineering optimum arrived at by natural selection over 350 million years.
+
+## Coiling Modes
+
+Not all ammonites coiled in the standard planispiral (flat coil) way. The Cretaceous in particular saw an explosion of **heteromorph** forms — ammonites that uncoiled partially or completely:
+
+| Shape | Name | Example genera |
+|-------|------|---------------|
+| Normal flat coil | Planispiral | *Ammonites*, *Perisphinctes* |
+| Open coil, not touching | Gyrocone | *Crioceras* |
+| Hook or shepherd's crook | Ancylocone | *Ancyloceras*, *Acrioceras* |
+| Helical screw | Turrilitone | *Turrilites* |
+| Trombone / paperclip | Nostoceratone | *Nipponites*, *Didymoceras* |
+| Irregular / worm-like | Ptychocone | *Ptychoceras* |
+
+For a long time, heteromorphs were thought to be "degenerate" or "diseased" ammonites. We now know they were **highly successful ecological specialists** — their unusual shapes were adaptations for specific ways of feeding or moving in the water column.
+
+*Nipponites mirabilis*, for example, looks like a tangled worm — but it was a precision-engineered life form, probably a slow-drifting ambush predator in calm waters.
+
+## The Allometry of Growth
+
+As an ammonite grew, all its dimensions scaled proportionally — a property called **isometric growth**. This means a juvenile ammonite looks like a perfect miniature of the adult. The logarithmic spiral ensures this: because the angle is constant everywhere, zooming in or out doesn't change the shape.
+
+This "self-similarity across scales" is the mathematical reason ammonite fossils are instantly recognizable regardless of size — from a 3mm juvenile to a 2-metre adult.
+
+Continue to [Evolution Timeline](/nature/ammonites/evolution-timeline) to see how these geometries evolved over 400 million years, or jump to [Ecology](/nature/ammonites/ecology) to understand how the shell's buoyancy system shaped ammonite behaviour.

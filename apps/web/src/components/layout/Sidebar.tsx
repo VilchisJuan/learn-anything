@@ -84,7 +84,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
   return (
     <>
-      {/* Desktop sidebar — always visible */}
+      {/* Desktop sidebar */}
       <aside className="hidden md:flex w-64 shrink-0 border-r border-border bg-sidebar flex-col h-full overflow-hidden">
         {sidebarContent}
       </aside>
@@ -93,7 +93,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       <AnimatePresence>
         {isOpen && (
           <>
-            {/* Backdrop */}
             <motion.div
               key="backdrop"
               initial={{ opacity: 0 }}
@@ -103,7 +102,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               className="fixed inset-0 z-40 bg-black/60 md:hidden"
               onClick={onClose}
             />
-            {/* Drawer */}
             <motion.aside
               key="drawer"
               initial={{ x: "-100%" }}
@@ -168,19 +166,38 @@ function AreaItem({ area, isExpanded, onToggle, onLinkClick }: AreaItemProps) {
             transition={{ duration: 0.2, ease: "easeInOut" }}
             className="overflow-hidden mt-0.5 ml-2 pl-3 border-l border-border space-y-0.5"
           >
-            {area.topics.map((topic) => (
-              <TopicItem
-                key={topic.id}
-                areaId={area.id}
-                topic={topic}
-                onLinkClick={onLinkClick}
-              />
-            ))}
+            {renderGroupedTopics(area, onLinkClick)}
           </motion.ul>
         )}
       </AnimatePresence>
     </li>
   );
+}
+
+/** Groups topics by their optional `group` field and renders group label headers. */
+function renderGroupedTopics(area: NavArea, onLinkClick: () => void): React.ReactNode[] {
+  const items: React.ReactNode[] = [];
+  let lastGroup: string | undefined = undefined;
+
+  for (const topic of area.topics) {
+    if (topic.group !== lastGroup) {
+      lastGroup = topic.group;
+      if (topic.group) {
+        items.push(
+          <li key={`grp-${topic.group}`} className="pt-2 pb-0.5">
+            <span className="px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+              {topic.group}
+            </span>
+          </li>
+        );
+      }
+    }
+    items.push(
+      <TopicItem key={topic.id} areaId={area.id} topic={topic} onLinkClick={onLinkClick} />
+    );
+  }
+
+  return items;
 }
 
 interface TopicItemProps {
