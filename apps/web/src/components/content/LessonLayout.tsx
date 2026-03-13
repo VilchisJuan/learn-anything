@@ -1,5 +1,6 @@
 import { MDXRemote } from "next-mdx-remote/rsc";
 import rehypeSlug from "rehype-slug";
+import rehypePrettyCode from "rehype-pretty-code";
 import Link from "next/link";
 import type { LessonData } from "@/lib/mdx";
 import { LevelBadge } from "@/components/ui/LevelBadge";
@@ -84,22 +85,39 @@ const MDX_COMPONENTS = {
       {children}
     </strong>
   ),
-  code: ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => (
-    <code
-      className="font-mono text-[17px] bg-muted border border-border px-1.5 py-0.5 rounded text-primary"
-      {...props}
-    >
-      {children}
-    </code>
-  ),
-  pre: ({ children, ...props }: React.HTMLAttributes<HTMLPreElement>) => (
-    <pre
-      className="bg-muted border border-border rounded-lg p-4 overflow-x-auto text-[17px] font-mono mb-4 leading-6"
-      {...props}
-    >
-      {children}
-    </pre>
-  ),
+  code: ({ children, ...props }: React.HTMLAttributes<HTMLElement> & { "data-language"?: string }) => {
+    // Block code processed by rehype-pretty-code — it applies inline token colors, skip extra styling
+    if (props["data-language"]) {
+      return <code {...props}>{children}</code>;
+    }
+    // Inline code
+    return (
+      <code
+        className="font-mono text-[17px] bg-muted border border-border px-1.5 py-0.5 rounded text-primary"
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  },
+  pre: ({ children, ...props }: React.HTMLAttributes<HTMLPreElement> & { "data-language"?: string }) => {
+    const lang = props["data-language"];
+    return (
+      <div className="mb-6">
+        {lang && (
+          <div className="flex items-center px-4 py-1.5 bg-zinc-900 rounded-t-lg border border-b-0 border-border">
+            <span className="text-xs text-zinc-400 font-mono tracking-wider">{lang}</span>
+          </div>
+        )}
+        <pre
+          className={`overflow-x-auto text-[15px] leading-6 font-mono p-4 border border-border ${lang ? "rounded-b-lg bg-zinc-950" : "rounded-lg bg-muted"}`}
+          {...props}
+        >
+          {children}
+        </pre>
+      </div>
+    );
+  },
   table: ({ children, ...props }: React.HTMLAttributes<HTMLTableElement>) => (
     <div className="overflow-x-auto mb-6">
       <table className="w-full text-sm border-collapse" {...props}>
@@ -182,7 +200,10 @@ export function LessonLayout({ lesson }: LessonLayoutProps) {
             components={MDX_COMPONENTS}
             options={{
               mdxOptions: {
-                rehypePlugins: [rehypeSlug],
+                rehypePlugins: [
+                  [rehypePrettyCode, { theme: "github-dark" }],
+                  rehypeSlug,
+                ],
               },
             }}
           />
