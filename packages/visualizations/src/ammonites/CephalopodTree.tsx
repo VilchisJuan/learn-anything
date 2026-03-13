@@ -122,7 +122,7 @@ export function CephalopodTree() {
 
       <div className="flex flex-col md:flex-row">
         <div className="flex-1 bg-[#0d0d0d] flex items-center justify-center p-2">
-          <svg viewBox={`0 0 ${W} ${H}`} className="max-w-full" style={{ maxHeight: H }}>
+          <svg viewBox={`0 0 ${W} ${H}`} className="max-w-full" style={{ maxHeight: 351 }}>
             {/* Edges */}
             {NODES.filter((n) => n.parent).map((n) => {
               const [x1, y1] = nodeXY(NODE_MAP[n.parent!]);

@@ -120,7 +120,7 @@ export function ShellParameterExplorer() {
       <div className="flex flex-col lg:flex-row">
         {/* SVG */}
         <div className="flex-1 bg-[#0d0d0d] flex items-center justify-center p-4">
-          <svg viewBox="0 0 390 390" className="max-w-full" style={{ maxHeight: 340 }}>
+          <svg viewBox="0 0 390 390" className="max-w-full" style={{ maxHeight: 442 }}>
             {/* Inner whorls fill */}
             <path d={innerFillPath} fill="#1e293b" opacity="0.7" />
 

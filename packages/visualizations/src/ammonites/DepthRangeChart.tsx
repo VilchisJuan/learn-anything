@@ -148,7 +148,7 @@ export function DepthRangeChart() {
 
       <div className="flex flex-col md:flex-row">
         <div className="flex-1 bg-[#0d0d0d] flex items-center justify-center p-3">
-          <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="max-w-full" style={{ maxHeight: SVG_H }}>
+          <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="max-w-full" style={{ maxHeight: 390 }}>
             {/* Ocean depth gradient background */}
             <defs>
               <linearGradient id="oceanGrad" x1="0" y1="0" x2="0" y2="1">

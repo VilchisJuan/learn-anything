@@ -149,7 +149,7 @@ export function ShellGrowthAnimation() {
       <div className="flex flex-col md:flex-row">
         {/* SVG */}
         <div className="flex-1 flex items-center justify-center bg-[#0d0d0d] p-4">
-          <svg viewBox="0 0 390 390" className="max-w-full" style={{ maxHeight: 340 }}>
+          <svg viewBox="0 0 390 390" className="max-w-full" style={{ maxHeight: 442 }}>
             {/* Umbilicus bg */}
             <AnimatePresence>
               {showInnerWhorl && (

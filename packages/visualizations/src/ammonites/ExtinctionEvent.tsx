@@ -98,7 +98,7 @@ export function ExtinctionEvent() {
       <div className="flex flex-col lg:flex-row">
         {/* Chart */}
         <div className="flex-1 bg-[#0d0d0d] p-4 flex flex-col gap-2">
-          <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
+          <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 208 }}>
             {/* Grid lines */}
             {[0, 25, 50, 75, 100].map((v) => (
               <g key={v}>

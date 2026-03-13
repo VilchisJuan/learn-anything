@@ -219,7 +219,7 @@ export function AmmoniteAnatomyDiagram() {
           <svg
             viewBox="0 0 520 340"
             className="max-w-full"
-            style={{ maxHeight: 340 }}
+            style={{ maxHeight: 442 }}
           >
             {/* Inner whorls / umbilicus */}
             <path

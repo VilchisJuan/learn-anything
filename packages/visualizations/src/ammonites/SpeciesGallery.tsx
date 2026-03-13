@@ -239,7 +239,7 @@ export function SpeciesGallery() {
             }`}
             style={active === sp.id ? { borderColor: sp.color } : {}}
           >
-            <div className="w-full aspect-square">
+            <div className="w-3/4 aspect-square mx-auto">
               <SpeciesSVG sp={sp} active={active === sp.id} />
             </div>
             <span

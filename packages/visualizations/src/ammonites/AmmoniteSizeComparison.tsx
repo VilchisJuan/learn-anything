@@ -128,7 +128,7 @@ export function AmmoniteSizeComparison() {
 
       <div className="flex flex-col">
         <div className="bg-[#0d0d0d] overflow-x-auto">
-          <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} width={SVG_W} height={SVG_H} style={{ minWidth: SVG_W }}>
+          <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} width={728} height={338} style={{ minWidth: 728 }}>
             {/* Ground line */}
             <line x1={0} y1={BASELINE} x2={SVG_W} y2={BASELINE} stroke="#1e293b" strokeWidth="1" />
 

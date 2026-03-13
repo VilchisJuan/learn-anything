@@ -185,7 +185,7 @@ function renderGroupedTopics(area: NavArea, onLinkClick: () => void): React.Reac
       if (topic.group) {
         items.push(
           <li key={`grp-${topic.group}`} className="pt-2 pb-0.5">
-            <span className="px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+            <span className="px-3 text-[13px] font-semibold uppercase tracking-widest text-muted-foreground/50">
               {topic.group}
             </span>
           </li>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface PreservationType {
@@ -169,6 +169,16 @@ const RARITY_COLORS = {
 export function PreservationTypes() {
   const [active, setActive] = useState<string | null>(null);
   const activeType = TYPES.find((t) => t.id === active);
+  const infoPanelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (active && infoPanelRef.current) {
+      // Small delay to let the panel animate open before scrolling
+      setTimeout(() => {
+        infoPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }, 100);
+    }
+  }, [active]);
 
   return (
     <div className="my-8 rounded-xl border border-border bg-[#111] overflow-hidden">
@@ -190,17 +200,17 @@ export function PreservationTypes() {
             }`}
             style={active === type.id ? { borderColor: type.color } : {}}
           >
-            {/* Swatch */}
-            <div className="w-full aspect-square max-h-16 mx-auto">
+            {/* Swatch — 200% of original */}
+            <div className="mx-auto" style={{ width: 166, height: 166 }}>
               <PreservationSwatch type={type} />
             </div>
-            <div>
+            <div className="text-center mt-1">
               <div className="text-xs font-semibold" style={{ color: active === type.id ? type.color : "#e2e8f0" }}>
                 {type.name}
               </div>
-              <div className="text-[9px] font-mono text-muted-foreground mt-0.5">{type.mineral}</div>
+              <div className="text-xs font-mono text-muted-foreground mt-0.5">{type.mineral}</div>
               <div
-                className="text-[9px] font-medium mt-1"
+                className="text-xs font-medium mt-1"
                 style={{ color: RARITY_COLORS[type.rarity] }}
               >
                 {type.rarity}
@@ -221,7 +231,7 @@ export function PreservationTypes() {
             transition={{ duration: 0.2 }}
             className="border-t border-border overflow-hidden"
           >
-            <div className="p-5 bg-[#0a0a0a] flex flex-col gap-3">
+            <div ref={infoPanelRef} className="p-5 bg-[#0a0a0a] flex flex-col gap-3">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: activeType.color }} />
                 <span className="text-sm font-semibold text-foreground">{activeType.name}</span>
@@ -235,15 +245,15 @@ export function PreservationTypes() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="rounded-md bg-[#111] border border-border p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">How it forms</p>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">How it forms</p>
                   <p className="text-xs text-foreground/70 leading-5">{activeType.howItForms}</p>
                 </div>
                 <div className="rounded-md bg-[#111] border border-border p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">What to look for</p>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">What to look for</p>
                   <p className="text-xs text-foreground/70 leading-5">{activeType.visualNote}</p>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {activeType.locations.map((loc) => (
-                      <span key={loc} className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{loc}</span>
+                      <span key={loc} className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{loc}</span>
                     ))}
                   </div>
                 </div>
