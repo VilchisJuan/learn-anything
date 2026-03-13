@@ -145,167 +145,277 @@ export function GeologicTimeline() {
 
   const period = PERIODS.find((p) => p.name === activePeriod);
 
+  const InfoPanel = () => (
+    <AnimatePresence mode="wait">
+      {activeEvent ? (
+        <motion.div
+          key={activeEvent.label}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.18 }}
+          className="rounded-lg border border-border bg-[#0a0a0a] p-4 flex gap-3"
+        >
+          <span className="text-xl shrink-0" style={{ color: EVENT_COLORS[activeEvent.type] }}>
+            {EVENT_ICONS[activeEvent.type]}
+          </span>
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <h4 className="text-sm font-semibold text-foreground">{activeEvent.label}</h4>
+              <span className="text-xs text-muted-foreground font-mono">{activeEvent.ma} Ma</span>
+            </div>
+            <p className="text-xs text-foreground/75 leading-5">{activeEvent.detail}</p>
+          </div>
+        </motion.div>
+      ) : period ? (
+        <motion.div
+          key={period.name}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.18 }}
+          className="rounded-lg border border-border bg-[#0a0a0a] p-4"
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: period.color }} />
+            <h4 className="text-sm font-semibold text-foreground">{period.name}</h4>
+            <span className="text-xs text-muted-foreground font-mono ml-auto">{period.start}–{period.end} Ma</span>
+          </div>
+          <p className="text-xs font-medium text-muted-foreground mb-2">{period.summary}</p>
+          <p className="text-xs text-foreground/75 leading-5">{period.detail}</p>
+        </motion.div>
+      ) : (
+        <motion.div
+          key="empty"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="rounded-lg border border-border/50 bg-[#0a0a0a] p-4 text-center text-xs text-muted-foreground"
+        >
+          Tap a period to explore, or tap an event marker (◆ ✕ ▲) for key moments.
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
   return (
     <div className="my-8 rounded-xl border border-border bg-[#111] overflow-hidden select-none">
       <div className="px-5 py-4 border-b border-border">
         <h3 className="text-sm font-semibold text-foreground">Ammonite Evolution Timeline</h3>
-        <p className="text-xs text-muted-foreground mt-0.5">400 million years of history — click a period to explore</p>
+        <p className="text-xs text-muted-foreground mt-0.5">400 million years of history — tap a period to explore</p>
       </div>
 
-      <div className="p-5 flex flex-col gap-4">
-        {/* Time axis label */}
-        <div className="flex justify-between text-[10px] text-muted-foreground font-mono px-0.5">
-          <span>420 Ma</span>
-          <span>← millions of years ago →</span>
-          <span>66 Ma</span>
-        </div>
-
-        {/* Period bars */}
-        <div className="relative flex flex-col gap-1.5">
-          {PERIODS.map((p) => {
-            const left = pct(p.start);
-            const width = pct(p.end) - pct(p.start);
-            const isActive = activePeriod === p.name;
-
-            return (
-              <div key={p.name} className="relative h-10 rounded overflow-hidden bg-[#0d0d0d] border border-border/50">
-                {/* Period fill */}
-                <button
-                  className="absolute h-full rounded transition-opacity"
-                  style={{
-                    left: `${left}%`,
-                    width: `${width}%`,
-                    backgroundColor: p.color + (isActive ? "50" : "30"),
-                    borderRight: `2px solid ${p.color}60`,
-                  }}
-                  onClick={() => {
-                    setActivePeriod(isActive ? null : p.name);
-                    setActiveEvent(null);
-                  }}
-                />
-
-                {/* Diversity bar */}
-                <div
-                  className="absolute bottom-0 rounded-sm pointer-events-none"
-                  style={{
-                    left: `${left}%`,
-                    width: `${width}%`,
-                    height: `${p.diversity * 0.4}%`,
-                    backgroundColor: p.color + "80",
-                  }}
-                />
-
-                {/* Period label */}
-                <span
-                  className="absolute inset-y-0 flex items-center px-2 text-[11px] font-medium pointer-events-none"
-                  style={{
-                    left: `${left}%`,
-                    color: isActive ? p.color : "#94a3b8",
-                  }}
-                >
-                  {p.name}
-                </span>
-
-                {/* Events */}
-                {p.events.map((ev) => (
-                  <button
-                    key={ev.label}
-                    className="absolute top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-[9px] font-bold z-10 hover:scale-125 transition-transform"
-                    style={{
-                      left: `${pct(ev.ma)}%`,
-                      transform: "translateX(-50%) translateY(-50%)",
-                      color: EVENT_COLORS[ev.type],
-                      backgroundColor: EVENT_COLORS[ev.type] + "25",
-                      border: `1px solid ${EVENT_COLORS[ev.type]}60`,
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveEvent(activeEvent?.label === ev.label ? null : ev);
-                    }}
-                    title={ev.label}
-                  >
-                    {EVENT_ICONS[ev.type]}
-                  </button>
-                ))}
-              </div>
-            );
-          })}
-
-          {/* Ma tick marks */}
-          <div className="relative h-4">
-            {[420, 400, 380, 360, 340, 320, 300, 280, 260, 240, 220, 200, 180, 160, 140, 120, 100, 80, 66].map((ma) => (
-              <span
-                key={ma}
-                className="absolute text-[9px] text-muted-foreground/50 font-mono"
-                style={{ left: `${pct(ma)}%`, transform: "translateX(-50%)" }}
-              >
-                {ma}
-              </span>
-            ))}
-          </div>
-        </div>
-
+      {/* ── Mobile layout: vertical cards ─────────────────────────────── */}
+      <div className="sm:hidden p-4 flex flex-col gap-3">
         {/* Legend */}
-        <div className="flex flex-wrap gap-4 text-[10px] text-muted-foreground">
+        <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground pb-1">
           {Object.entries(EVENT_ICONS).map(([type, icon]) => (
-            <span key={type} className="flex items-center gap-1.5">
+            <span key={type} className="flex items-center gap-1">
               <span style={{ color: EVENT_COLORS[type as keyof typeof EVENT_COLORS] }}>{icon}</span>
               <span className="capitalize">{type}</span>
             </span>
           ))}
         </div>
 
-        {/* Info panel */}
-        <AnimatePresence mode="wait">
-          {activeEvent ? (
-            <motion.div
-              key={activeEvent.label}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.18 }}
-              className="rounded-lg border border-border bg-[#0a0a0a] p-4 flex gap-3"
+        {/* Period cards */}
+        {PERIODS.map((p) => {
+          const isActive = activePeriod === p.name;
+          return (
+            <div
+              key={p.name}
+              className="rounded-lg border overflow-hidden"
+              style={{ borderColor: isActive ? p.color + "80" : "#ffffff18" }}
             >
-              <span className="text-xl shrink-0" style={{ color: EVENT_COLORS[activeEvent.type] }}>
-                {EVENT_ICONS[activeEvent.type]}
-              </span>
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <h4 className="text-sm font-semibold text-foreground">{activeEvent.label}</h4>
-                  <span className="text-xs text-muted-foreground font-mono">{activeEvent.ma} Ma</span>
+              {/* Card header — tap to expand */}
+              <button
+                className="w-full flex items-center gap-3 px-3 py-3 text-left"
+                style={{ backgroundColor: p.color + (isActive ? "25" : "15") }}
+                onClick={() => {
+                  setActivePeriod(isActive ? null : p.name);
+                  setActiveEvent(null);
+                }}
+              >
+                {/* Diversity pip */}
+                <div className="flex flex-col justify-end w-2 h-8 bg-white/5 rounded-sm overflow-hidden shrink-0">
+                  <div
+                    className="w-full rounded-sm"
+                    style={{ height: `${p.diversity}%`, backgroundColor: p.color }}
+                  />
                 </div>
-                <p className="text-xs text-foreground/75 leading-5">{activeEvent.detail}</p>
-              </div>
-            </motion.div>
-          ) : period ? (
-            <motion.div
-              key={period.name}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.18 }}
-              className="rounded-lg border border-border bg-[#0a0a0a] p-4"
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: period.color }} />
-                <h4 className="text-sm font-semibold text-foreground">{period.name}</h4>
-                <span className="text-xs text-muted-foreground font-mono ml-auto">{period.start}–{period.end} Ma</span>
-              </div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">{period.summary}</p>
-              <p className="text-xs text-foreground/75 leading-5">{period.detail}</p>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="rounded-lg border border-border/50 bg-[#0a0a0a] p-4 text-center text-xs text-muted-foreground"
-            >
-              Click a colored period bar to see details, or click an event marker (◆ ✕ ▲) for key moments.
-            </motion.div>
-          )}
-        </AnimatePresence>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold" style={{ color: p.color }}>{p.name}</span>
+                    <span className="text-[10px] text-muted-foreground font-mono ml-auto shrink-0">{p.start}–{p.end} Ma</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{p.summary}</p>
+                </div>
+                <span className="text-muted-foreground text-xs shrink-0">{isActive ? "▲" : "▼"}</span>
+              </button>
+
+              {/* Expanded: detail + events */}
+              <AnimatePresence>
+                {isActive && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="px-3 pb-3 pt-2 bg-[#0a0a0a] flex flex-col gap-3">
+                      <p className="text-xs text-foreground/75 leading-5">{p.detail}</p>
+                      {p.events.length > 0 && (
+                        <div className="flex flex-col gap-2">
+                          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Key events</span>
+                          {p.events.map((ev) => {
+                            const isEvActive = activeEvent?.label === ev.label;
+                            return (
+                              <button
+                                key={ev.label}
+                                className="flex items-start gap-2 text-left rounded-md p-2 transition-colors"
+                                style={{
+                                  backgroundColor: isEvActive ? EVENT_COLORS[ev.type] + "20" : "transparent",
+                                  border: `1px solid ${isEvActive ? EVENT_COLORS[ev.type] + "50" : "transparent"}`,
+                                }}
+                                onClick={() => setActiveEvent(isEvActive ? null : ev)}
+                              >
+                                <span
+                                  className="text-sm shrink-0 mt-0.5"
+                                  style={{ color: EVENT_COLORS[ev.type] }}
+                                >
+                                  {EVENT_ICONS[ev.type]}
+                                </span>
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[11px] font-medium text-foreground">{ev.label}</span>
+                                    <span className="text-[10px] text-muted-foreground font-mono">{ev.ma} Ma</span>
+                                  </div>
+                                  {isEvActive && (
+                                    <p className="text-[11px] text-foreground/70 leading-[1.6] mt-1">{ev.detail}</p>
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Desktop layout: horizontal bars ───────────────────────────── */}
+      <div className="hidden sm:block p-5">
+        <div className="flex flex-col gap-4">
+          {/* Time axis label */}
+          <div className="flex justify-between text-[10px] text-muted-foreground font-mono px-0.5">
+            <span>420 Ma</span>
+            <span>← millions of years ago →</span>
+            <span>66 Ma</span>
+          </div>
+
+          {/* Period bars */}
+          <div className="relative flex flex-col gap-1.5">
+            {PERIODS.map((p) => {
+              const left = pct(p.start);
+              const width = pct(p.end) - pct(p.start);
+              const isActive = activePeriod === p.name;
+
+              return (
+                <div key={p.name} className="relative h-10 rounded overflow-hidden bg-[#0d0d0d] border border-border/50">
+                  {/* Period fill */}
+                  <button
+                    className="absolute h-full rounded transition-opacity"
+                    style={{
+                      left: `${left}%`,
+                      width: `${width}%`,
+                      backgroundColor: p.color + (isActive ? "50" : "30"),
+                      borderRight: `2px solid ${p.color}60`,
+                    }}
+                    onClick={() => {
+                      setActivePeriod(isActive ? null : p.name);
+                      setActiveEvent(null);
+                    }}
+                  />
+
+                  {/* Diversity bar */}
+                  <div
+                    className="absolute bottom-0 rounded-sm pointer-events-none"
+                    style={{
+                      left: `${left}%`,
+                      width: `${width}%`,
+                      height: `${p.diversity * 0.4}%`,
+                      backgroundColor: p.color + "80",
+                    }}
+                  />
+
+                  {/* Period label */}
+                  <span
+                    className="absolute inset-y-0 flex items-center px-2 text-[11px] font-medium pointer-events-none"
+                    style={{
+                      left: `${left}%`,
+                      color: isActive ? p.color : "#94a3b8",
+                    }}
+                  >
+                    {p.name}
+                  </span>
+
+                  {/* Events */}
+                  {p.events.map((ev) => (
+                    <button
+                      key={ev.label}
+                      className="absolute top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-[9px] font-bold z-10 hover:scale-125 transition-transform"
+                      style={{
+                        left: `${pct(ev.ma)}%`,
+                        transform: "translateX(-50%) translateY(-50%)",
+                        color: EVENT_COLORS[ev.type],
+                        backgroundColor: EVENT_COLORS[ev.type] + "25",
+                        border: `1px solid ${EVENT_COLORS[ev.type]}60`,
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveEvent(activeEvent?.label === ev.label ? null : ev);
+                      }}
+                      title={ev.label}
+                    >
+                      {EVENT_ICONS[ev.type]}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+
+            {/* Ma tick marks */}
+            <div className="relative h-4">
+              {[420, 400, 380, 360, 340, 320, 300, 280, 260, 240, 220, 200, 180, 160, 140, 120, 100, 80, 66].map((ma) => (
+                <span
+                  key={ma}
+                  className="absolute text-[9px] text-muted-foreground/50 font-mono"
+                  style={{ left: `${pct(ma)}%`, transform: "translateX(-50%)" }}
+                >
+                  {ma}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Legend */}
+          <div className="flex flex-wrap gap-4 text-[10px] text-muted-foreground">
+            {Object.entries(EVENT_ICONS).map(([type, icon]) => (
+              <span key={type} className="flex items-center gap-1.5">
+                <span style={{ color: EVENT_COLORS[type as keyof typeof EVENT_COLORS] }}>{icon}</span>
+                <span className="capitalize">{type}</span>
+              </span>
+            ))}
+          </div>
+
+          {/* Info panel */}
+          <InfoPanel />
+        </div>
       </div>
     </div>
   );
