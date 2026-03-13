@@ -2,11 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause, RotateCcw, SkipBack, SkipForward } from "lucide-react";
-
-const SPEEDS = [0.5, 1, 2, 4] as const;
-type Speed = typeof SPEEDS[number];
-const BASE_INTERVAL = 700; // ms at 1x
+import { PlaybackControls } from "../shared/PlaybackControls";
 
 // ─── Data: species diversity 90 Ma → 63 Ma ────────────────────────────────────
 // Ammonites vs Nautiloids across the K-Pg boundary at 66 Ma
@@ -67,7 +63,7 @@ export function ExtinctionEvent() {
   const [hoveredPoint, setHoveredPoint] = useState<DataPoint | null>(null);
   const [animStep, setAnimStep] = useState<number>(DATA.length - 1);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<Speed>(1);
+  const [speed, setSpeed] = useState(700); // ms interval
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -77,7 +73,7 @@ export function ExtinctionEvent() {
           if (s >= DATA.length - 1) { setPlaying(false); return s; }
           return s + 1;
         });
-      }, BASE_INTERVAL / speed);
+      }, speed);
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [playing, speed]);
@@ -86,14 +82,6 @@ export function ExtinctionEvent() {
   function togglePlay() {
     if (animStep >= DATA.length - 1) { setAnimStep(0); setPlaying(true); }
     else setPlaying((p) => !p);
-  }
-  function stepBack() { setPlaying(false); setAnimStep((s) => Math.max(0, s - 1)); }
-  function stepForward() { setPlaying(false); setAnimStep((s) => Math.min(DATA.length - 1, s + 1)); }
-  function cycleSpeed() {
-    setSpeed((s) => {
-      const idx = SPEEDS.indexOf(s);
-      return SPEEDS[(idx + 1) % SPEEDS.length];
-    });
   }
 
   const visibleData = DATA.slice(0, animStep + 1);
@@ -207,23 +195,20 @@ export function ExtinctionEvent() {
             </g>
           </svg>
 
-          {/* Controls */}
-          <div className="flex items-center gap-2 pt-1">
-            <button onClick={reset} className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" title="Reset">
-              <RotateCcw size={13} />
-            </button>
-            <button onClick={stepBack} className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" title="Step back" disabled={animStep === 0}>
-              <SkipBack size={13} />
-            </button>
-            <button
-              onClick={togglePlay}
-              className={`p-1.5 rounded transition-colors ${playing ? "text-red-400 bg-red-400/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
-            >
-              {playing ? <Pause size={13} /> : <Play size={13} />}
-            </button>
-            <button onClick={stepForward} className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" title="Step forward" disabled={animStep === DATA.length - 1}>
-              <SkipForward size={13} />
-            </button>
+          <PlaybackControls
+            isPlaying={playing}
+            onTogglePlay={togglePlay}
+            onStepBack={() => { setPlaying(false); setAnimStep((s) => Math.max(0, s - 1)); }}
+            onStepForward={() => { setPlaying(false); setAnimStep((s) => Math.min(DATA.length - 1, s + 1)); }}
+            onReset={reset}
+            disableBack={animStep === 0}
+            disableFwd={animStep === DATA.length - 1}
+            speed={speed}
+            onSpeedChange={setSpeed}
+            minMs={150}
+            maxMs={2000}
+            accentColor="#f87171"
+          >
             <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden mx-1">
               <motion.div
                 className="h-full bg-red-400/70 rounded-full"
@@ -231,15 +216,8 @@ export function ExtinctionEvent() {
                 transition={{ duration: 0.25 }}
               />
             </div>
-            <button
-              onClick={cycleSpeed}
-              className="text-[10px] font-mono px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground hover:border-red-400/50 transition-colors"
-              title="Change speed"
-            >
-              {speed}×
-            </button>
             <span className="text-[10px] font-mono text-muted-foreground">{DATA[animStep].ma} Ma</span>
-          </div>
+          </PlaybackControls>
         </div>
 
         {/* Info panel */}

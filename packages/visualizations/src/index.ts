@@ -1,3 +1,4 @@
+export { PlaybackControls } from "./shared/PlaybackControls";
 export { HiraganaChart } from "./japanese/HiraganaChart";
 export { KatakanaChart } from "./japanese/KatakanaChart";
 export { KanaQuiz } from "./japanese/KanaQuiz";

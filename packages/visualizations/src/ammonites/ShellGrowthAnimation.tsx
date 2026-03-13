@@ -2,11 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause, RotateCcw, SkipBack, SkipForward } from "lucide-react";
-
-const SPEEDS = [0.5, 1, 2, 4] as const;
-type Speed = typeof SPEEDS[number];
-const BASE_INTERVAL = 1200; // ms at 1x
+import { PlaybackControls } from "../shared/PlaybackControls";
 
 // Logarithmic spiral: r = A · e^(B·θ)
 const A = 12, B = 0.20;
@@ -119,7 +115,7 @@ const TOTAL_STEPS = STEPS.length;
 export function ShellGrowthAnimation() {
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<Speed>(1);
+  const [speed, setSpeed] = useState(1200); // ms interval
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -129,7 +125,7 @@ export function ShellGrowthAnimation() {
           if (s >= TOTAL_STEPS - 1) { setPlaying(false); return s; }
           return s + 1;
         });
-      }, BASE_INTERVAL / speed);
+      }, speed);
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [playing, speed]);
@@ -137,14 +133,6 @@ export function ShellGrowthAnimation() {
   function reset() { setStep(0); setPlaying(false); }
   function togglePlay() {
     if (step >= TOTAL_STEPS - 1) { setStep(0); setPlaying(true); } else setPlaying((p) => !p);
-  }
-  function stepBack() { setPlaying(false); setStep((s) => Math.max(0, s - 1)); }
-  function stepForward() { setPlaying(false); setStep((s) => Math.min(TOTAL_STEPS - 1, s + 1)); }
-  function cycleSpeed() {
-    setSpeed((s) => {
-      const idx = SPEEDS.indexOf(s);
-      return SPEEDS[(idx + 1) % SPEEDS.length];
-    });
   }
 
   const current = STEPS[step];
@@ -284,23 +272,20 @@ export function ShellGrowthAnimation() {
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="px-5 py-3 border-t border-border flex items-center gap-2 bg-[#0a0a0a]">
-        <button onClick={reset} className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" title="Reset">
-          <RotateCcw size={14} />
-        </button>
-        <button onClick={stepBack} className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" title="Step back" disabled={step === 0}>
-          <SkipBack size={14} />
-        </button>
-        <button
-          onClick={togglePlay}
-          className={`p-1.5 rounded transition-colors ${playing ? "text-amber-400 bg-amber-400/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
-        >
-          {playing ? <Pause size={14} /> : <Play size={14} />}
-        </button>
-        <button onClick={stepForward} className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" title="Step forward" disabled={step === TOTAL_STEPS - 1}>
-          <SkipForward size={14} />
-        </button>
+      <PlaybackControls
+        isPlaying={playing}
+        onTogglePlay={togglePlay}
+        onStepBack={() => { setPlaying(false); setStep((s) => Math.max(0, s - 1)); }}
+        onStepForward={() => { setPlaying(false); setStep((s) => Math.min(TOTAL_STEPS - 1, s + 1)); }}
+        onReset={reset}
+        disableBack={step === 0}
+        disableFwd={step === TOTAL_STEPS - 1}
+        speed={speed}
+        onSpeedChange={setSpeed}
+        minMs={200}
+        maxMs={3000}
+        accentColor="#f59e0b"
+      >
         <div className="flex gap-1 mx-1">
           {STEPS.map((s, i) => (
             <button
@@ -312,15 +297,8 @@ export function ShellGrowthAnimation() {
             />
           ))}
         </div>
-        <button
-          onClick={cycleSpeed}
-          className="ml-auto text-[10px] font-mono px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground hover:border-amber-400/50 transition-colors"
-          title="Change speed"
-        >
-          {speed}×
-        </button>
-        <span className="text-xs text-muted-foreground font-mono">{step + 1}/{TOTAL_STEPS}</span>
-      </div>
+        <span className="ml-auto text-xs text-muted-foreground font-mono">{step + 1}/{TOTAL_STEPS}</span>
+      </PlaybackControls>
     </div>
   );
 }

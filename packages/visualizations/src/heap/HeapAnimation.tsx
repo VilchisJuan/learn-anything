@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause, SkipBack, SkipForward, RotateCcw, AlertTriangle, CheckCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle } from "lucide-react";
+import { PlaybackControls } from "../shared/PlaybackControls";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -565,33 +566,22 @@ export function HeapAnimation() {
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="px-5 py-3 border-t border-border flex flex-col gap-2 bg-[#0a0a0a]">
-        {/* Row 1 — playback buttons + step counter */}
-        <div className="flex items-center gap-3">
-          <button onClick={reset} className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors" title="Reset">
-            <RotateCcw size={14} />
-          </button>
-          <button onClick={prev} disabled={atStart} className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
-            <SkipBack size={14} />
-          </button>
-          <button
-            onClick={() => setPlaying(!isPlaying)}
-            className={`p-1.5 rounded transition-colors ${isPlaying ? "text-indigo-400 bg-indigo-400/10 hover:bg-indigo-400/20" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
-          >
-            {isPlaying ? <Pause size={14} /> : <Play size={14} />}
-          </button>
-          <button onClick={next} disabled={atEnd} className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
-            <SkipForward size={14} />
-          </button>
-          <span className="ml-auto text-xs text-muted-foreground font-mono">{step + 1} / {SCENARIO.length}</span>
-        </div>
-        {/* Row 2 — speed slider full width */}
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-muted-foreground shrink-0">Speed</span>
-          <input type="range" min={600} max={3500} step={200} value={4100 - speed} onChange={(e) => setSpeed(4100 - Number(e.target.value))} className="flex-1 accent-indigo-500 h-1" />
-        </div>
-      </div>
+      <PlaybackControls
+        isPlaying={isPlaying}
+        onTogglePlay={() => setPlaying(!isPlaying)}
+        onStepBack={prev}
+        onStepForward={next}
+        onReset={reset}
+        disableBack={atStart}
+        disableFwd={atEnd}
+        speed={speed}
+        onSpeedChange={setSpeed}
+        minMs={600}
+        maxMs={3500}
+        accentColor="#818cf8"
+      >
+        <span className="ml-auto text-xs text-muted-foreground font-mono">{step + 1} / {SCENARIO.length}</span>
+      </PlaybackControls>
     </div>
   );
 }
