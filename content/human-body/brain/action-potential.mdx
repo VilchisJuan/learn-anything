@@ -1,0 +1,70 @@
+---
+title: The Action Potential
+description: The action potential is the fundamental electrical signal of the nervous system — a rapid, self-propagating voltage spike governed by the coordinated opening and closing of ion channels.
+level: intermediate
+area: human-body
+topic: brain
+---
+
+## The Language of the Nervous System
+
+Every thought, sensation, and movement ultimately reduces to electrical signals passing along neurons. The fundamental unit of that electrical language is the **action potential** — a brief, rapid change in voltage across a neuron's membrane that sweeps down the axon like a wave, carrying information from one end of the cell to the other without any loss of amplitude.
+
+The action potential was first characterized in detail by Alan Hodgkin and Andrew Huxley, working on the giant axon of the squid in the 1950s. Their mathematical model — the Hodgkin-Huxley equations — accurately described the ionic mechanism of the action potential and earned them the Nobel Prize in Physiology or Medicine in 1963. Fifty years later, it remains one of the greatest achievements in neuroscience.
+
+<ActionPotentialAnimation />
+
+## The Resting Membrane Potential
+
+Before an action potential can occur, the neuron must maintain a **resting membrane potential** of approximately **−70 mV** (millivolts) — meaning the inside of the cell is 70 mV more negative than the outside. This voltage gradient arises from an unequal distribution of ions across the membrane, maintained by:
+
+- **Na⁺/K⁺-ATPase pumps**: enzymes that actively transport 3 Na⁺ ions out of the cell for every 2 K⁺ ions pumped in, creating concentration gradients.
+- **Selective ion channels**: the resting membrane is much more permeable to K⁺ than to Na⁺ (through leak channels), so K⁺ tends to diffuse out, taking positive charge with it and leaving the interior relatively negative.
+
+The result is a stable, energetically maintained electrical potential — a battery that is always charged and ready to fire.
+
+## Threshold and Depolarization
+
+An action potential begins when the membrane is depolarized beyond a critical threshold, approximately **−55 mV**. This can occur when synaptic inputs (EPSPs — excitatory postsynaptic potentials) accumulate at the axon hillock. When threshold is crossed, **voltage-gated Na⁺ channels** open rapidly.
+
+Na⁺ rushes into the cell along its steep electrochemical gradient (high outside, low inside; positive outside relative to inside). This influx of positive charge further depolarizes the membrane, which opens more Na⁺ channels — a positive feedback loop that drives the membrane potential rapidly upward, from −55 mV to approximately **+30 mV** in under a millisecond.
+
+### The All-or-Nothing Law
+
+The action potential obeys an **all-or-nothing principle**: if threshold is reached, a full-amplitude action potential fires; if threshold is not reached, nothing happens. The amplitude is always approximately the same (~100 mV swing) regardless of how far above threshold the stimulus was. Information is encoded not in the height of individual spikes but in their **firing rate** (frequency) and temporal pattern.
+
+## Repolarization
+
+Within about 1 millisecond, the membrane potential begins to reverse. Two events drive this:
+
+1. Voltage-gated Na⁺ channels **inactivate** (a separate inactivation gate closes even while the activation gate is open), cutting off Na⁺ influx.
+2. **Voltage-gated K⁺ channels** open more slowly than Na⁺ channels but are now fully open. K⁺ rushes out, carrying positive charge with it, driving the membrane potential back toward negative values.
+
+## Hyperpolarization and the Refractory Periods
+
+K⁺ channels are slow to close, so K⁺ continues to leave briefly even after the membrane reaches the resting potential. This causes the membrane to dip slightly below −70 mV — a transient state called **hyperpolarization** or the **undershoot**.
+
+The refractory periods are direct consequences of channel states:
+
+- **Absolute refractory period**: During and just after the peak, inactivated Na⁺ channels cannot reopen regardless of stimulation intensity. No second action potential can occur. This enforces a maximum firing rate and ensures signals travel in only one direction along the axon.
+- **Relative refractory period**: As channels recover and hyperpolarization resolves, a second action potential *can* occur — but requires a stronger-than-normal stimulus. This limits the maximum firing frequency.
+
+## Saltatory Conduction in Myelinated Axons
+
+In unmyelinated axons, the action potential propagates by a wave of sequential ion-channel openings along the entire length of the axon membrane. This is reliable but slow: only 0.5–2 m/s.
+
+Myelinated axons achieve much faster conduction through **saltatory conduction** (from Latin *saltare*, "to jump"). The myelin sheath — produced by oligodendrocytes — insulates the axon membrane, preventing ion flow except at periodic gaps called **nodes of Ranvier**, which are packed with high densities of Na⁺ and K⁺ channels. The action potential effectively "jumps" from one node to the next, regenerating only at each node rather than along the entire axon.
+
+Myelinated conduction velocities can reach **70–120 m/s** for large motor and sensory fibers — essential for rapid reflex responses and fine motor coordination. The importance of myelin is starkly illustrated by multiple sclerosis, in which demyelination slows or blocks conduction and produces the disease's wide range of neurological deficits.
+
+## From Spikes to Signals
+
+A single neuron in the cerebral cortex fires perhaps 1–100 action potentials per second under normal conditions. The brain's computation emerges from billions of such neurons firing in coordinated patterns — patterns that encode sensory information, drive motor commands, and give rise to all aspects of cognition. Understanding the action potential is therefore not merely a matter of cellular biophysics: it is the foundation for understanding everything the brain does.
+
+For the next step — how the action potential is converted into a chemical signal at the synapse — see [Synaptic Transmission](/human-body/brain/synaptic-transmission). For the brain-wide rhythms that emerge from populations of spiking neurons, see [Neural Oscillations](/human-body/brain/neural-oscillations).
+
+## Related Topics
+
+- [Neurons](/human-body/brain/neurons) — the cells that generate and carry action potentials
+- [Synaptic Transmission](/human-body/brain/synaptic-transmission) — what happens when an action potential reaches the axon terminal
+- [Neural Oscillations](/human-body/brain/neural-oscillations) — population-level rhythms built from individual spikes

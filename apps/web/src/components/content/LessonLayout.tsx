@@ -13,6 +13,8 @@ import {
   AmmoniteAnatomyDiagram, ShellGrowthAnimation, GeologicTimeline, SutureDiagram, ExtinctionEvent,
   AmmoniteSizeComparison, CephalopodTree, DepthRangeChart, PreservationTypes,
   ShellParameterExplorer, SpeciesGallery, HeteromorphGallery, AmmoniteQuiz, AmmoniteTimeLapse,
+  BrainAnatomyExplorer, NeuronDiagram, ActionPotentialAnimation, SynapseAnimation,
+  NeurotransmitterMap, MemoryTypesChart, SleepStageAnimation, BrainwaveVisualizer,
 } from "@learn-anything/visualizations";
 
 interface LessonLayoutProps {
@@ -178,6 +180,14 @@ const MDX_COMPONENTS = {
   HeteromorphGallery: () => <HeteromorphGallery />,
   AmmoniteQuiz: () => <AmmoniteQuiz />,
   AmmoniteTimeLapse: () => <AmmoniteTimeLapse />,
+  BrainAnatomyExplorer: () => <BrainAnatomyExplorer />,
+  NeuronDiagram: () => <NeuronDiagram />,
+  ActionPotentialAnimation: () => <ActionPotentialAnimation />,
+  SynapseAnimation: () => <SynapseAnimation />,
+  NeurotransmitterMap: () => <NeurotransmitterMap />,
+  MemoryTypesChart: () => <MemoryTypesChart />,
+  SleepStageAnimation: () => <SleepStageAnimation />,
+  BrainwaveVisualizer: () => <BrainwaveVisualizer />,
 };
 
 export function LessonLayout({ lesson }: LessonLayoutProps) {
