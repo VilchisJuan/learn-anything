@@ -55,29 +55,29 @@ const MDX_COMPONENTS = {
   a: MdxLink,
   h2: ({ children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => (
     <h2
-      className="text-xl font-bold text-foreground mt-10 mb-4 pb-2 border-b border-border scroll-mt-20"
+      className="text-[15px] md:text-xl font-bold text-foreground mt-10 mb-4 pb-2 border-b border-border scroll-mt-20"
       {...props}
     >
       {children}
     </h2>
   ),
   h3: ({ children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => (
-    <h3 className="text-base font-semibold text-foreground mt-6 mb-3 scroll-mt-20" {...props}>
+    <h3 className="text-[12px] md:text-base font-semibold text-foreground mt-6 mb-3 scroll-mt-20" {...props}>
       {children}
     </h3>
   ),
   p: ({ children, ...props }: React.HTMLAttributes<HTMLParagraphElement>) => (
-    <p className="text-[20px] leading-7 text-foreground/90 mb-4" {...props}>
+    <p className="text-[15px] md:text-[20px] leading-7 text-foreground/90 mb-4" {...props}>
       {children}
     </p>
   ),
   ul: ({ children, ...props }: React.HTMLAttributes<HTMLUListElement>) => (
-    <ul className="list-disc pl-5 mb-4 space-y-1.5 text-[20px] text-foreground/90" {...props}>
+    <ul className="list-disc pl-5 mb-4 space-y-1.5 text-[15px] md:text-[20px] text-foreground/90" {...props}>
       {children}
     </ul>
   ),
   ol: ({ children, ...props }: React.HTMLAttributes<HTMLOListElement>) => (
-    <ol className="list-decimal pl-5 mb-4 space-y-1.5 text-[20px] text-foreground/90" {...props}>
+    <ol className="list-decimal pl-5 mb-4 space-y-1.5 text-[15px] md:text-[20px] text-foreground/90" {...props}>
       {children}
     </ol>
   ),
@@ -99,7 +99,7 @@ const MDX_COMPONENTS = {
     // Inline code
     return (
       <code
-        className="font-mono text-[17px] bg-muted border border-border px-1.5 py-0.5 rounded text-primary"
+        className="font-mono text-[13px] md:text-[17px] bg-muted border border-border px-1.5 py-0.5 rounded text-primary"
         {...props}
       >
         {children}
@@ -116,7 +116,7 @@ const MDX_COMPONENTS = {
           </div>
         )}
         <pre
-          className={`overflow-x-auto text-[15px] leading-6 font-mono p-4 border border-border ${lang ? "rounded-b-lg bg-zinc-950" : "rounded-lg bg-muted"}`}
+          className={`overflow-x-auto text-[11px] md:text-[15px] leading-6 font-mono p-4 border border-border ${lang ? "rounded-b-lg bg-zinc-950" : "rounded-lg bg-muted"}`}
           {...props}
         >
           {children}
@@ -215,7 +215,7 @@ export function LessonLayout({ lesson }: LessonLayoutProps) {
               </>
             )}
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-3 tracking-tight">
+          <h1 className="text-lg md:text-2xl lg:text-3xl font-bold text-foreground mb-3 tracking-tight">
             {frontmatter.title}
           </h1>
           <div className="flex flex-wrap items-center gap-3">
