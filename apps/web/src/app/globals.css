@@ -31,7 +31,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Scale up ~30% on desktop so everything reads larger */
+/* Scale down 25% on mobile, scale up ~30% on desktop */
+html {
+  font-size: 75%;
+}
+
 @media (min-width: 768px) {
   html {
     font-size: 130%;
