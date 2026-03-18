@@ -32,3 +32,7 @@ export { NeurotransmitterMap } from "./brain/NeurotransmitterMap";
 export { MemoryTypesChart } from "./brain/MemoryTypesChart";
 export { SleepStageAnimation } from "./brain/SleepStageAnimation";
 export { BrainwaveVisualizer } from "./brain/BrainwaveVisualizer";
+export { RegexTester } from "./regex/RegexTester";
+export { RegexCheatSheet } from "./regex/RegexCheatSheet";
+export { RegexExercise } from "./regex/RegexExercise";
+export { RegexChallenges } from "./regex/RegexChallenges";

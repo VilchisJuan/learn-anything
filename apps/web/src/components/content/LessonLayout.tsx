@@ -15,6 +15,7 @@ import {
   ShellParameterExplorer, SpeciesGallery, HeteromorphGallery, AmmoniteQuiz, AmmoniteTimeLapse,
   BrainAnatomyExplorer, NeuronDiagram, ActionPotentialAnimation, SynapseAnimation,
   NeurotransmitterMap, MemoryTypesChart, SleepStageAnimation, BrainwaveVisualizer,
+  RegexTester, RegexCheatSheet, RegexExercise, RegexChallenges,
 } from "@learn-anything/visualizations";
 
 interface LessonLayoutProps {
@@ -188,6 +189,10 @@ const MDX_COMPONENTS = {
   MemoryTypesChart: () => <MemoryTypesChart />,
   SleepStageAnimation: () => <SleepStageAnimation />,
   BrainwaveVisualizer: () => <BrainwaveVisualizer />,
+  RegexTester: () => <RegexTester />,
+  RegexCheatSheet: () => <RegexCheatSheet />,
+  RegexExercise: () => <RegexExercise />,
+  RegexChallenges: () => <RegexChallenges />,
 };
 
 export function LessonLayout({ lesson }: LessonLayoutProps) {

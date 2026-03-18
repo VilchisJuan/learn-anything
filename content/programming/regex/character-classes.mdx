@@ -1,0 +1,135 @@
+---
+title: Character Classes
+description: Match sets and ranges of characters using bracket notation, shorthands like \d and \w, and negation.
+level: beginner
+area: programming
+topic: regex
+---
+
+A **character class** is a set of characters enclosed in square brackets `[...]`. The pattern matches any **single character** from the set. Character classes are one of the most frequently used regex features.
+
+## Basic Character Sets
+
+```
+Pattern: [aeiou]
+Matches one of: "a", "e", "i", "o", "u"
+
+Input:  "hello world"
+Finds:  h[e]ll[o] w[o]rld  → 3 matches: e, o, o
+```
+
+```
+Pattern: [abc]
+Matches: "a", "b", or "c" (one at a time)
+```
+
+Order inside `[...]` does not matter. `[abc]` and `[cba]` are equivalent.
+
+## Character Ranges
+
+Use a hyphen `-` inside `[...]` to define a **range**:
+
+```
+[a-z]   lowercase letters a through z
+[A-Z]   uppercase letters A through Z
+[0-9]   digits 0 through 9
+[a-zA-Z]  any letter (lower or upper)
+[a-zA-Z0-9]  any alphanumeric character
+```
+
+The range is based on Unicode code points. `[a-z]` works as expected; `[a-Z]` is not meaningful (a > Z in Unicode).
+
+```
+Pattern: [A-Z][a-z]+
+Matches: "Hello", "World", "Python"
+No match: "hello" (starts lowercase), "HELLO" (all caps)
+```
+
+## Negated Character Classes
+
+Place `^` immediately after `[` to **negate** the class — match any character NOT in the set:
+
+```
+[^aeiou]   any character that is NOT a vowel
+[^0-9]     any character that is NOT a digit
+[^\n]      any character that is NOT a newline
+```
+
+Note: `^` only negates when it is the **first character** inside `[...]`. Anywhere else in the pattern, `^` means start of string.
+
+```
+Pattern: [^,]+
+Input:  "apple,banana,cherry"
+Matches: "apple", "banana", "cherry"  (splits on commas)
+```
+
+## Shorthand Classes
+
+These shorthands are abbreviations for common character classes:
+
+| Shorthand | Equivalent | Meaning |
+|---|---|---|
+| `\d` | `[0-9]` | Any digit |
+| `\D` | `[^0-9]` | Any non-digit |
+| `\w` | `[a-zA-Z0-9_]` | Word character (letters, digits, underscore) |
+| `\W` | `[^a-zA-Z0-9_]` | Non-word character |
+| `\s` | `[ \t\r\n\f\v]` | Whitespace (space, tab, newlines) |
+| `\S` | `[^ \t\r\n\f\v]` | Non-whitespace |
+
+Shorthands can be used inside `[...]` too:
+
+```
+[\d\s]   any digit or whitespace
+[\w-]    word characters or a hyphen (useful for slug matching)
+```
+
+## The Dot vs Character Classes
+
+The `.` metacharacter matches any character except newline. This is a much wider set than most character classes. Prefer explicit character classes when you know what you want:
+
+```
+Pattern: \d\d\d-\d\d\d\d
+Matches phone numbers like: "555-1234"
+More precise than: ...-....
+```
+
+## Combining Inside a Class
+
+You can mix literal characters, ranges, and shorthands inside one class:
+
+```
+[\w\-.]     word chars, hyphens, and dots — useful for email local parts
+[A-Za-z_]   letters and underscore — valid Python identifier start
+[0-9A-Fa-f] hexadecimal digits
+```
+
+## Practical Examples
+
+**Hex color validation:**
+```
+Pattern: #[0-9A-Fa-f]{6}
+Matches: "#FF5733", "#1a2b3c"
+```
+
+**Slug pattern (URL-safe string):**
+```
+Pattern: [a-z0-9-]+
+Matches: "my-blog-post", "product-123"
+```
+
+**Extract words (no punctuation):**
+```
+Pattern: [a-zA-Z]+
+Input:  "Hello, world! 42"
+Matches: "Hello", "world"
+```
+
+## Try It
+
+<RegexTester />
+
+## Related Topics
+
+- [Literal characters](/programming/regex/characters) — the basics before character classes
+- [Quantifiers](/programming/regex/quantifiers) — repeat character classes with `+`, `*`, `{n}`
+- [Anchors](/programming/regex/anchors) — constrain where classes can match

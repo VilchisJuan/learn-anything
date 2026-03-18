@@ -1,0 +1,188 @@
+---
+title: Common Regex Patterns
+description: Battle-tested patterns for email, URL, phone, date, IP address, and other real-world validation tasks.
+level: intermediate
+area: programming
+topic: regex
+---
+
+These are production-grade regex patterns used across the industry. Each section explains the pattern, its trade-offs, and when to use a simpler or more complex alternative.
+
+## Email Address
+
+The complete RFC 5321 email spec is nearly impossible to express as a regex. In practice, use a pragmatic pattern that catches 99% of real addresses:
+
+```
+Pattern: ^[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)*\.[a-zA-Z]{2,}$
+```
+
+Breaking it down:
+- `^[\w.+\-]+` — local part: word chars, dots, plus, hyphen
+- `@` — the literal @ symbol
+- `[\w\-]+` — domain name
+- `(?:\.[\w\-]+)*` — optional subdomains
+- `\.[a-zA-Z]{2,}$` — TLD: 2+ letters
+
+```js
+const emailRx = /^[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)*\.[a-zA-Z]{2,}$/i;
+emailRx.test("user@example.com");          // true
+emailRx.test("name.last+tag@sub.host.org"); // true
+emailRx.test("notanemail");                 // false
+```
+
+> For serious validation, send a confirmation email. Regex cannot verify that an address actually exists.
+
+## URL
+
+```
+Pattern: https?://[\w\-]+(\.[\w\-]+)+([\w\-./?%&=#]*)?
+```
+
+```js
+const urlRx = /https?:\/\/[\w\-]+(\.[\w\-]+)+([\w\-./?%&=#]*)?/i;
+urlRx.test("https://example.com");          // true
+urlRx.test("http://sub.domain.io/path?q=1"); // true
+```
+
+For stricter validation (RFC 3986 compliant), use a URL parsing library instead.
+
+## Phone Number
+
+Phone numbers vary enormously by country. A flexible international pattern:
+
+```
+Pattern: ^\+?[\d\s\-().]{7,20}$
+```
+
+US-specific (XXX-XXX-XXXX or (XXX) XXX-XXXX):
+
+```
+Pattern: ^(\+1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$
+```
+
+```js
+const usPhone = /^(\+1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$/;
+usPhone.test("555-1234");         // false (missing area code)
+usPhone.test("555-867-5309");     // true
+usPhone.test("(555) 867-5309");   // true
+usPhone.test("+1 555-867-5309");  // true
+```
+
+## Date (ISO 8601)
+
+```
+Pattern: ^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$
+```
+
+Breaking it down:
+- `\d{4}` — 4-digit year
+- `(0[1-9]|1[0-2])` — month 01–12
+- `(0[1-9]|[12]\d|3[01])` — day 01–31
+
+```js
+const isoDate = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+isoDate.test("2024-03-15");  // true
+isoDate.test("2024-13-01");  // false (month 13)
+isoDate.test("2024-00-10");  // false (month 00)
+```
+
+Note: Regex cannot validate whether February 30th is invalid — use a proper date library for semantic validation.
+
+## IP Address (IPv4)
+
+```
+Pattern: ^(25[0-5]|2[0-4]\d|[01]?\d\d?)(\.(25[0-5]|2[0-4]\d|[01]?\d\d?)){3}$
+```
+
+Each octet group:
+- `25[0-5]` — 250–255
+- `2[0-4]\d` — 200–249
+- `[01]?\d\d?` — 0–199
+
+```js
+const ipv4 = /^(25[0-5]|2[0-4]\d|[01]?\d\d?)(\.(25[0-5]|2[0-4]\d|[01]?\d\d?)){3}$/;
+ipv4.test("192.168.1.1");  // true
+ipv4.test("256.0.0.1");    // false (256 > 255)
+ipv4.test("0.0.0.0");      // true
+```
+
+## Hex Color Code
+
+```
+Pattern: ^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$
+```
+
+```js
+const hexColor = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/;
+hexColor.test("#fff");     // true (shorthand)
+hexColor.test("#FF5733");  // true
+hexColor.test("#GG0000");  // false (G is not hex)
+```
+
+## Password Strength
+
+```
+Pattern: ^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[!@#$%^&*]).{8,}$
+```
+
+Using [lookaheads](/programming/regex/lookaheads) to assert each requirement independently:
+- `(?=.*[A-Z])` — at least one uppercase
+- `(?=.*[a-z])` — at least one lowercase
+- `(?=.*\d)` — at least one digit
+- `(?=.*[!@#$%^&*])` — at least one special character
+- `.{8,}` — minimum 8 characters total
+
+## Username
+
+```
+Pattern: ^[a-zA-Z][a-zA-Z0-9_\-]{2,19}$
+```
+
+- Must start with a letter
+- 3–20 characters total
+- Letters, digits, underscore, hyphen only
+
+## Slug (URL-Safe String)
+
+```
+Pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+```
+
+Matches "my-blog-post" but not "--double-dash" or "trailing-".
+
+## Zip Code (US)
+
+```
+Pattern: ^\d{5}(-\d{4})?$
+```
+
+Matches "12345" or "12345-6789" (ZIP+4 format).
+
+## Credit Card Number (Basic)
+
+```
+Pattern: ^\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}$
+```
+
+This is a format check only — use Luhn algorithm validation for real payment processing.
+
+## HTML Tag (Simple)
+
+```
+Pattern: <([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>
+```
+
+> Never use regex as your primary HTML parser. Use a proper DOM parser for production code. Regex is fine for simple ad-hoc extraction.
+
+## Try the Patterns
+
+Paste these patterns into the tester to experiment:
+
+<RegexTester />
+
+## Related Topics
+
+- [Lookaheads and lookbehinds](/programming/regex/lookaheads) — used in password patterns
+- [Groups and references](/programming/regex/groups) — used in alternation patterns like the IP octet
+- [Quantifiers](/programming/regex/quantifiers) — `{n,m}` for exact-length fields
+- [Exercises](/programming/regex/exercises) — test your knowledge with challenges

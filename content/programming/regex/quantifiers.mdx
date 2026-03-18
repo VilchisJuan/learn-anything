@@ -1,0 +1,145 @@
+---
+title: Quantifiers
+description: Control how many times a pattern element repeats using *, +, ?, {n,m}, and the greedy vs lazy distinction.
+level: beginner
+area: programming
+topic: regex
+---
+
+A **quantifier** tells the regex engine how many times the preceding element should appear. Without quantifiers, each token in a pattern matches exactly once.
+
+## The Basic Quantifiers
+
+| Quantifier | Meaning |
+|---|---|
+| `*` | Zero or more (0, 1, 2, …) |
+| `+` | One or more (1, 2, 3, …) |
+| `?` | Zero or one (optional) |
+| `{n}` | Exactly n times |
+| `{n,}` | At least n times |
+| `{n,m}` | Between n and m times (inclusive) |
+
+```
+Pattern: \d+
+Matches: "1", "42", "1000", "0"
+No match: "" (empty), "abc"
+
+Pattern: \d*
+Matches: "", "0", "123"  (empty string also matches!)
+
+Pattern: colou?r
+Matches: "color", "colour"  (u is optional)
+```
+
+## Exact and Range Quantifiers
+
+```
+Pattern: \d{4}
+Matches: "2024", "1999"
+No match: "24" (too short), "12345" (too long — but it finds 1234 inside)
+
+Pattern: \d{2,4}
+Matches: "12", "123", "1234"
+No match: "1" (too short)
+
+Pattern: [a-z]{3,}
+Matches: "cat", "hello", "supercalifragilistic"
+```
+
+## Greedy vs Lazy
+
+By default, quantifiers are **greedy** — they match as many characters as possible while still allowing the overall pattern to succeed.
+
+```
+Input:   "<b>bold</b> and <i>italic</i>"
+Pattern: <.*>
+```
+
+A greedy `.*` consumes everything from the first `<` to the **last** `>`:
+
+```
+Match: "<b>bold</b> and <i>italic</i>"  (one big match)
+```
+
+This is almost never what you want when parsing HTML or any paired delimiter.
+
+### Making a Quantifier Lazy
+
+Add `?` after any quantifier to make it **lazy** (also called non-greedy or reluctant). Lazy quantifiers match as **few** characters as possible:
+
+| Greedy | Lazy |
+|---|---|
+| `*` | `*?` |
+| `+` | `+?` |
+| `?` | `??` |
+| `{n,m}` | `{n,m}?` |
+
+```
+Input:   "<b>bold</b> and <i>italic</i>"
+Pattern: <.*?>
+Matches: "<b>", "</b>", "<i>", "</i>"  (each tag separately)
+```
+
+### When to Use Each
+
+- **Greedy**: When you know the content cannot contain the closing delimiter (e.g., `[^"]*` inside quotes)
+- **Lazy**: When content may span many characters before the closing delimiter
+
+The most efficient pattern for matching quoted strings is actually a negated class, not lazy:
+
+```
+Pattern: "[^"]*"   (greedy, but can't eat the closing quote)
+Better than: ".*?"  (lazy — correct but slightly slower)
+```
+
+## Quantifiers Apply to the Preceding Element
+
+Quantifiers attach to the single token immediately before them — whether that is a literal character, a character class, a shorthand, or a group:
+
+```
+ab+       → a followed by one or more b's: "ab", "abb", "abbb"
+(ab)+     → one or more "ab" groups: "ab", "abab", "ababab"
+[a-z]+    → one or more lowercase letters
+\d{3}-\d{4}  → phone number pattern: "555-1234"
+```
+
+## Catastrophic Backtracking
+
+Greedy quantifiers with backtracking can cause performance problems on certain input patterns. The classic example:
+
+```
+Pattern: (a+)+b
+Input:   "aaaaaaaaaaaaaaac"  (no trailing b)
+```
+
+The engine tries every possible way to split the `a`s between the outer and inner groups before giving up. This is **catastrophic backtracking** — exponential time complexity. Always prefer atomic groups or possessive quantifiers (where supported) for high-performance regex.
+
+## Practical Examples
+
+**Match a decimal number:**
+```
+Pattern: \d+\.?\d*
+Matches: "42", "3.14", "100.0"
+```
+
+**Match an optional sign:**
+```
+Pattern: [+-]?\d+
+Matches: "42", "+42", "-42"
+```
+
+**Match 1 to 3 words:**
+```
+Pattern: \w+(\s+\w+){0,2}
+Matches: "hello", "hello world", "one two three"
+```
+
+## Try It
+
+<RegexTester />
+
+## Related Topics
+
+- [Character classes](/programming/regex/character-classes) — what quantifiers apply to
+- [Groups and references](/programming/regex/groups) — group elements before applying a quantifier
+- [Anchors](/programming/regex/anchors) — constrain where the quantified pattern can start

@@ -1,0 +1,153 @@
+---
+title: Lookaheads and Lookbehinds
+description: Zero-width assertions that match based on what comes before or after the current position, without consuming characters.
+level: advanced
+area: programming
+topic: regex
+---
+
+**Lookaheads** and **lookbehinds** (collectively called **lookarounds**) are zero-width assertions — like [anchors](/programming/regex/anchors), they check a condition at the current position without consuming any characters from the input.
+
+They allow you to say things like: "match this, but only if it is followed by that" or "match this, but only if it is not preceded by that."
+
+## Positive Lookahead `(?=...)`
+
+Asserts that the pattern inside must match at the current position (looking forward), but does not consume those characters:
+
+```
+Pattern: \d+(?= dollars)
+Input:  "I have 42 dollars and 10 euros"
+Match:  "42"  (the " dollars" part is not included in the match)
+```
+
+The engine finds "42", checks that " dollars" follows, and returns "42" as the match — the word "dollars" is not consumed and remains part of the string.
+
+```js
+"100 dollars".match(/\d+(?= dollars)/); // ["100"]
+"100 euros".match(/\d+(?= dollars)/);   // null — no match
+```
+
+## Negative Lookahead `(?!...)`
+
+Asserts that the pattern inside must **not** match at the current position:
+
+```
+Pattern: \d+(?! dollars)
+Input:  "42 euros"   → matches "42" (not followed by " dollars")
+Input:  "42 dollars" → no match (IS followed by " dollars")
+```
+
+```js
+// Match numbers NOT followed by "px":
+"12px 42em 8px".match(/\d+(?!px)/g); // ["42"]
+```
+
+## Positive Lookbehind `(?<=...)`
+
+Asserts that the pattern inside must match immediately **before** the current position:
+
+```
+Pattern: (?<=\$)\d+
+Input:  "$42 and €99"
+Match:  "42"  (the dollar sign is behind it, not consumed)
+```
+
+```js
+"$100".match(/(?<=\$)\d+/); // ["100"]
+"€100".match(/(?<=\$)\d+/); // null
+```
+
+## Negative Lookbehind `(?<!...)`
+
+Asserts that the pattern inside must **not** precede the current position:
+
+```
+Pattern: (?<!\$)\d+
+Input:  "$42 and 99 items"
+Match:  "99"  (not preceded by $)
+```
+
+## Summary Table
+
+| Syntax | Name | Meaning |
+|---|---|---|
+| `(?=abc)` | Positive lookahead | Followed by `abc` |
+| `(?!abc)` | Negative lookahead | Not followed by `abc` |
+| `(?<=abc)` | Positive lookbehind | Preceded by `abc` |
+| `(?<!abc)` | Negative lookbehind | Not preceded by `abc` |
+
+## Variable-Length Lookbehinds
+
+In JavaScript (ES2018+) and most PCRE implementations, lookbehind patterns **can** be variable length:
+
+```js
+// Match digits not preceded by $ or €
+/(?<![$€])\d+/g
+```
+
+Some older engines (JavaScript pre-ES2018, some Python versions) only allow fixed-length lookbehinds. Always check your engine's documentation.
+
+## Practical Use Cases
+
+### Password Validation with Multiple Lookaheads
+
+Combine multiple lookaheads to enforce all conditions simultaneously:
+
+```js
+const strong = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[!@#$%]).{8,}$/;
+// Must have: uppercase, lowercase, digit, special char, min 8 length
+```
+
+Each lookahead starts from the beginning (`.*` allows any prefix). They all check the same string independently, then the final `.{8,}` consumes it.
+
+### Extract Number Without Currency Symbol
+
+```
+Pattern: (?<=[$€£¥])\d+(\.\d{2})?
+Input:  "$42.99 or €100"
+Matches: "42.99", "100"
+```
+
+### Find Camel Case Word Boundaries
+
+```
+Pattern: (?<=[a-z])(?=[A-Z])
+Input:  "camelCaseString"
+Matches: position between "l" and "C", and between "e" and "S"
+```
+
+Useful for inserting spaces: `"camelCase".replace(/(?<=[a-z])(?=[A-Z])/g, " ")` → `"camel Case"`
+
+### Avoid Matching Inside Code Blocks
+
+```
+Pattern: (?<!`)keyword(?!`)
+```
+
+### Match Last Occurrence of a Word
+
+```
+Pattern: \b\w+\b(?!.*\b\w+\b)
+```
+
+## Lookarounds Are Not Consumed
+
+This is the key property: after a lookaround matches, the engine's position in the string has **not moved**. This allows multiple overlapping matches:
+
+```
+Pattern: (?=(\d{2}))
+Input:  "12345"
+Matches at positions: 1234, 234, 34, 4 → overlapping
+```
+
+Without lookahead, `\d{2}` with the `g` flag would only find "12" and "34" (non-overlapping).
+
+## Try It
+
+<RegexTester />
+
+## Related Topics
+
+- [Anchors](/programming/regex/anchors) — other zero-width assertions (`^`, `$`, `\b`)
+- [Groups and references](/programming/regex/groups) — lookarounds are a specialized form of grouping
+- [Common patterns](/programming/regex/common-patterns) — see lookaheads in real-world regex

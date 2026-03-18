@@ -1,0 +1,136 @@
+---
+title: Literal Characters and Metacharacters
+description: How regex engines read literal text, which characters have special meaning, and how to escape them.
+level: beginner
+area: programming
+topic: regex
+---
+
+The simplest regex is just a plain string. The pattern `cat` matches the literal sequence of characters c, a, t — wherever they appear in the input.
+
+```
+Input:  "The cat sat on the mat"
+Pattern: cat
+Match:  "The [cat] sat on the mat"
+```
+
+This works identically to a plain `indexOf` search. Regex becomes powerful once you introduce **metacharacters** — characters that have special meaning in the pattern syntax.
+
+## The Metacharacters
+
+There are 14 characters with special meaning in regex:
+
+```
+. ^ $ * + ? { } [ ] \ | ( )
+```
+
+When the engine sees any of these, it interprets them as instructions rather than literal text.
+
+| Character | Meaning |
+|---|---|
+| `.` | Any single character (except newline) |
+| `^` | Start of string (or line) |
+| `$` | End of string (or line) |
+| `*` | Zero or more of the preceding element |
+| `+` | One or more of the preceding element |
+| `?` | Zero or one of the preceding element |
+| `{` `}` | Quantifier bounds (e.g., `{3,5}`) |
+| `[` `]` | Character class |
+| `\` | Escape the next character |
+| `\|` | Alternation (OR) |
+| `(` `)` | Grouping / capturing |
+
+## The Dot: Any Character
+
+The `.` matches **any single character** except a newline (`\n`). It is often the first metacharacter beginners encounter.
+
+```
+Pattern: c.t
+Matches: "cat", "cut", "c3t", "c t", "c!t"
+No match: "ct" (nothing between c and t)
+```
+
+With the `s` (dotAll) flag enabled, `.` also matches newlines.
+
+## Escaping Metacharacters
+
+To match a metacharacter literally, **prefix it with a backslash** `\`.
+
+```
+Pattern: 3\.14
+Matches: "3.14"
+No match: "3x14" (the dot is now literal)
+```
+
+```
+Pattern: \$\d+
+Matches: "$42", "$1000"
+No match: "42" (no dollar sign)
+```
+
+A common mistake: forgetting to escape `.` when matching file extensions or IP addresses.
+
+```js
+// Wrong: matches "config_json" too (. = any char)
+/config.json/
+
+// Correct: literal dot
+/config\.json/
+```
+
+## The Backslash as Escape
+
+The `\` character has two jobs:
+1. **Escape a metacharacter** — makes the next char literal: `\.`, `\*`, `\+`
+2. **Introduce a shorthand** — creates a special token: `\d`, `\w`, `\s`
+
+This means `\\` matches a literal backslash.
+
+```
+Pattern: C:\\Users
+Matches: "C:\Users" (Windows path)
+```
+
+In JavaScript and most languages, regex patterns written as strings require double-escaping because the string itself also processes backslashes:
+
+```js
+// In a regex literal — single backslash:
+/\d+/
+
+// In a string passed to new RegExp — double backslash:
+new RegExp("\\d+")
+```
+
+Always prefer regex literals (`/pattern/`) over strings when possible.
+
+## Special Character Sequences
+
+These backslash sequences are not escapes but **character shorthands**:
+
+| Sequence | Meaning |
+|---|---|
+| `\n` | Newline |
+| `\r` | Carriage return |
+| `\t` | Tab |
+| `\0` | Null character |
+
+## Case Sensitivity
+
+By default, regex is **case-sensitive**. `cat` does not match `Cat` or `CAT`. Use the `i` flag to ignore case.
+
+```
+Pattern: /cat/i
+Matches: "cat", "Cat", "CAT", "cAt"
+```
+
+## Try It
+
+Experiment with literal characters and escaping in the tester:
+
+<RegexTester />
+
+## Related Topics
+
+- [Character classes](/programming/regex/character-classes) — groups of characters like `\d`, `[a-z]`
+- [Flags](/programming/regex/flags) — `i` for case insensitivity, `g` for global matching
+- [Quantifiers](/programming/regex/quantifiers) — repeat patterns with `*`, `+`, `?`

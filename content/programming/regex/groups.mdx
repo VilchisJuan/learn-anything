@@ -1,0 +1,171 @@
+---
+title: Groups and Backreferences
+description: Capture, reuse, and reference matched text using (), (?:), named groups, and backreferences.
+level: intermediate
+area: programming
+topic: regex
+---
+
+**Groups** serve two purposes in regex: they organize pattern elements (for quantifiers or alternation), and they can **capture** the matched text for later use.
+
+## Capturing Groups `(...)`
+
+Parentheses create a capturing group. The text matched by the group is saved and can be retrieved after the match:
+
+```js
+const match = "2024-03-15".match(/(\d{4})-(\d{2})-(\d{2})/);
+// match[0] = "2024-03-15"  (full match)
+// match[1] = "2024"        (group 1)
+// match[2] = "03"          (group 2)
+// match[3] = "15"          (group 3)
+```
+
+Groups are numbered left to right by their **opening parenthesis**:
+
+```
+Pattern: (a(b(c)))
+Group 1: abc
+Group 2: bc
+Group 3: c
+```
+
+### Using Groups in Replace
+
+Captured groups can be referenced in replacement strings:
+
+```js
+// Reformat MM/DD/YYYY → YYYY-MM-DD
+"03/15/2024".replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$1-$2");
+// → "2024-03-15"
+```
+
+In JavaScript, `$1` through `$9` reference the captured groups. In Python, use `\1` or `\g<1>`.
+
+## Non-Capturing Groups `(?:...)`
+
+If you only need to group for a quantifier or alternation — not to capture — use `(?:...)`. This avoids polluting your match array with unwanted captures:
+
+```js
+// With capturing group:
+"abababc".match(/(ab)+c/);
+// → ["ababc", "ab"]  (last captured "ab" in group 1)
+
+// With non-capturing group:
+"abababc".match(/(?:ab)+c/);
+// → ["ababc"]  (no group 1)
+```
+
+Non-capturing groups are also slightly faster since the engine doesn't need to store the match.
+
+## Named Capturing Groups `(?<name>...)`
+
+Give a group a name for self-documenting patterns and easier access:
+
+```js
+const rx = /(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})/;
+const { year, month, day } = "2024-03-15".match(rx).groups;
+// year = "2024", month = "03", day = "15"
+```
+
+Named groups are supported in JavaScript (ES2018+), Python, .NET, PCRE, and most modern engines.
+
+In replacements, reference named groups with `$<name>` (JavaScript) or `\g<name>` (Python):
+
+```js
+"2024-03-15".replace(
+  /(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})/,
+  "$<month>/$<day>/$<year>"
+);
+// → "03/15/2024"
+```
+
+## Backreferences `\1`, `\2`, ...
+
+A **backreference** matches the same text that was previously captured by the corresponding group. This lets you detect repeated content.
+
+```
+Pattern: (\w+)\s\1
+Input:  "the the cat"
+Match:  "the the"  (group 1 captured "the", \1 matched it again)
+```
+
+Real-world uses:
+
+**Find duplicate words (typos):**
+```
+Pattern: \b(\w+)\s+\1\b
+Matches: "the the", "is is", "a a a" (the the + a chain)
+```
+
+**Match opening and closing HTML tags (simplified):**
+```
+Pattern: <(\w+)>.*?</\1>
+Matches: "<b>hello</b>", "<div>content</div>"
+Won't match: "<b>mismatched</div>"
+```
+
+**Match balanced quotes:**
+```
+Pattern: (["']).*?\1
+Matches: "double quoted", 'single quoted'
+```
+
+Named groups can also be backreferenced:
+```
+Pattern: (?<tag>\w+)__\k<tag>
+Matches: "name__name", "foo__foo"
+```
+
+## Alternation with Groups
+
+The `|` (pipe) operator creates **alternation** — match either the left or right side:
+
+```
+Pattern: cat|dog
+Matches: "cat" or "dog"
+
+Pattern: gr(a|e)y
+Matches: "gray" or "grey"
+
+Pattern: (?:https?|ftp)://
+Matches: "http://", "https://", "ftp://"
+```
+
+Alternation has the **lowest precedence** of all regex operators. Use groups to limit its scope:
+
+```
+Pattern: ^cat|dog$
+Means: (^cat) OR (dog$)    ← probably not what you want
+
+Pattern: ^(cat|dog)$
+Means: start, then cat or dog, then end  ← correct
+```
+
+## Practical Patterns Using Groups
+
+**Parse a simple log line:**
+```
+Pattern: \[(\d{4}-\d{2}-\d{2})\] (\w+): (.+)
+Input:  "[2024-03-15] ERROR: Connection refused"
+Group 1: "2024-03-15"
+Group 2: "ERROR"
+Group 3: "Connection refused"
+```
+
+**Extract protocol and domain from a URL:**
+```
+Pattern: (https?)://([^/]+)
+Input:  "https://example.com/path"
+Group 1: "https"
+Group 2: "example.com"
+```
+
+## Try It
+
+<RegexTester />
+
+## Related Topics
+
+- [Lookaheads and lookbehinds](/programming/regex/lookaheads) — zero-width groups for conditional matching
+- [Quantifiers](/programming/regex/quantifiers) — apply `+`, `*`, `?` to groups
+- [Anchors](/programming/regex/anchors) — anchor grouped alternations

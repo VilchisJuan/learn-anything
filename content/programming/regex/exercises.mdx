@@ -1,0 +1,76 @@
+---
+title: Regex Exercises and Challenges
+description: Test your regex knowledge with a comprehensive quiz and hands-on coding challenges.
+level: intermediate
+area: programming
+topic: regex
+---
+
+This lesson has two parts:
+
+1. **Knowledge Quiz** — multiple-choice questions testing your understanding of regex concepts
+2. **Live Challenges** — write actual regex patterns that must pass test cases
+
+Both are interactive — try them without hints first, then use the assistance features when you're stuck.
+
+## Cheat Sheet Reference
+
+If you need a quick reference while working through the exercises, check the cheat sheet:
+
+<RegexCheatSheet />
+
+## Part 1: Knowledge Quiz
+
+Test your conceptual understanding of everything covered in this course:
+
+<RegexExercise />
+
+## Part 2: Coding Challenges
+
+Write regex patterns that pass all the test cases. Each challenge includes:
+- A description of what to match
+- Test cases that must pass (or explicitly not match)
+- A hint button if you're stuck
+- A solution reveal if you need it
+
+<RegexChallenges />
+
+## Part 3: Open Tester
+
+Use the tester below for any free-form experimentation:
+
+<RegexTester />
+
+## Common Patterns Reference
+
+Here are some patterns worth memorizing:
+
+| Task | Pattern |
+|---|---|
+| One or more digits | `\d+` |
+| Optional sign + number | `[+-]?\d+` |
+| Decimal number | `\d+\.?\d*` |
+| Word (no punctuation) | `\b[a-zA-Z]+\b` |
+| Whole line match | `^.*$` |
+| Empty line | `^$` |
+| Repeated word | `\b(\w+)\s+\1\b` |
+| Hex color | `#[0-9A-Fa-f]{3,6}` |
+| ISO date | `\d{4}-\d{2}-\d{2}` |
+| Simple email | `[\w.+\-]+@[\w\-]+\.[a-zA-Z]{2,}` |
+
+## Next Steps
+
+You now know everything needed to use regex confidently in real projects. Some directions to explore next:
+
+- **Regex in your language** — learn the specific API for Python (`re` module), JavaScript (built-in), Go (`regexp` package), or Rust (`regex` crate)
+- **Performance** — learn about possessive quantifiers and atomic groups to prevent catastrophic backtracking
+- **Unicode regex** — use `\p{L}`, `\p{N}` and Unicode categories for international text
+- **Regex in tools** — `grep`, `sed`, `awk`, VS Code search, and database queries all support regex
+
+## Related Topics
+
+- [Introduction to Regex](/programming/regex/introduction) — start from the beginning
+- [Character classes](/programming/regex/character-classes) — the building blocks
+- [Quantifiers](/programming/regex/quantifiers) — control repetition
+- [Groups and references](/programming/regex/groups) — capture and reuse
+- [Common patterns](/programming/regex/common-patterns) — production-ready patterns

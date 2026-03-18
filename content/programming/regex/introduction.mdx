@@ -1,0 +1,84 @@
+---
+title: Introduction to Regular Expressions
+description: What regular expressions are, where they come from, and why every developer needs to know them.
+level: beginner
+area: programming
+topic: regex
+---
+
+**Regular expressions** (regex or regexp) are sequences of characters that define a search pattern. They allow you to search, match, extract, and replace text with extraordinary precision — in a single line of code that would otherwise require dozens of lines of string manipulation logic.
+
+Regex is not a programming language. It is a **pattern language** that runs inside another language. Nearly every programming language — Python, JavaScript, Go, Java, Ruby, Rust — has built-in regex support, and the patterns are largely the same across all of them.
+
+## A Taste of What Regex Can Do
+
+Without regex, checking whether a string is a valid email address requires loops, character comparisons, and flag variables. With regex:
+
+```js
+const emailRegex = /^[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}$/;
+emailRegex.test("user@example.com"); // true
+emailRegex.test("not-an-email");     // false
+```
+
+Or find all hashtags in a tweet:
+
+```js
+const tags = tweet.match(/#\w+/g); // ["#regex", "#programming"]
+```
+
+Or reformat a date from `MM/DD/YYYY` to `YYYY-MM-DD`:
+
+```js
+"03/15/2024".replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$1-$2");
+// → "2024-03-15"
+```
+
+## A Brief History
+
+Regex has roots in theoretical computer science. In 1951, mathematician **Stephen Kleene** formalized the concept of regular languages and the notation to describe them (giving rise to the `*` operator, still called a "Kleene star"). In the 1960s, Ken Thompson implemented regex matching in the QED text editor, and later in the Unix tool `grep` — **G**lobally search for a **R**egular **E**xpression and **P**rint.
+
+The POSIX standard in the 1980s, and then Perl's extended regex in the 1990s, added features like lookaheads, named groups, and backreferences. Today, most languages follow the **PCRE** (Perl-Compatible Regular Expressions) standard.
+
+## Where Regex Is Used
+
+| Use Case | Example |
+|---|---|
+| Input validation | Email, phone, password strength |
+| Search & replace | Refactoring code, reformatting dates |
+| Parsing | Log files, CSV, HTML scraping |
+| Lexers & compilers | Tokenizing source code |
+| Data extraction | Pulling numbers, names, URLs from text |
+| URL routing | Matching URL patterns in web frameworks |
+
+## How Regex Works (Conceptually)
+
+A regex engine reads your pattern and your input string, then tries to find positions in the string where the pattern matches. The engine uses one of two strategies:
+
+- **NFA (Non-deterministic Finite Automaton)** — used by most modern engines (PCRE, Python `re`, JavaScript). It tries each alternative and backtracks if it fails. Supports lookaheads and backreferences.
+- **DFA (Deterministic Finite Automaton)** — used by tools like `grep -E`. Faster but cannot support features like backreferences.
+
+You don't need to understand the theory to use regex effectively, but knowing that backtracking exists explains why some patterns can be slow.
+
+## Try the Tester
+
+Use the interactive tester below to experiment as you learn. Type any pattern and watch it match in real time.
+
+<RegexTester />
+
+## What You Will Learn
+
+This course covers everything from the ground up:
+
+1. [Literal characters and metacharacters](/programming/regex/characters) — how the engine reads characters
+2. [Character classes](/programming/regex/character-classes) — `\d`, `\w`, `[a-z]`, and negation
+3. [Quantifiers](/programming/regex/quantifiers) — `*`, `+`, `?`, `{n,m}`, greedy vs lazy
+4. [Anchors](/programming/regex/anchors) — `^`, `$`, and word boundaries
+5. [Groups and references](/programming/regex/groups) — capturing, non-capturing, named groups, backreferences
+6. [Lookaheads and lookbehinds](/programming/regex/lookaheads) — zero-width assertions
+7. [Flags](/programming/regex/flags) — `g`, `i`, `m`, `s`, and others
+8. [Common patterns](/programming/regex/common-patterns) — real-world validated patterns
+9. [Exercises and challenges](/programming/regex/exercises) — hands-on practice
+
+## Related Topics
+
+- [String manipulation](/programming/memory-management/stack) — how strings are stored in memory

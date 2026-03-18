@@ -1,0 +1,143 @@
+---
+title: Regex Flags
+description: Modify regex engine behavior with flags — global, case-insensitive, multiline, dotAll, unicode, and sticky.
+level: beginner
+area: programming
+topic: regex
+---
+
+**Flags** (also called modifiers) change how the regex engine interprets and applies a pattern. They appear after the closing slash in regex literals, or as a second argument to `RegExp`:
+
+```js
+/pattern/gi        // regex literal with g and i flags
+new RegExp("pattern", "gi")  // equivalent
+```
+
+## The Six Standard Flags
+
+### `g` — Global
+
+Without `g`, the engine stops at the **first match**. With `g`, it finds all matches:
+
+```js
+"cat bat sat".match(/[a-z]at/);  // ["cat"]  (first only)
+"cat bat sat".match(/[a-z]at/g); // ["cat", "bat", "sat"]  (all)
+```
+
+With `g` and `exec()`, the engine remembers its position via `regex.lastIndex` and continues from there on each call. This enables iterating over matches manually.
+
+### `i` — Case-Insensitive
+
+Ignores the difference between upper and lowercase letters:
+
+```js
+/hello/i.test("Hello World"); // true
+/hello/i.test("HELLO");       // true
+
+// Without i:
+/hello/.test("Hello World");  // false
+```
+
+Applies to character ranges too: `[a-z]` with `i` matches A-Z as well.
+
+### `m` — Multiline
+
+Changes what `^` and `$` match:
+- Without `m`: `^` = start of string, `$` = end of string
+- With `m`: `^` = start of each line, `$` = end of each line
+
+```js
+const text = "first\nsecond\nthird";
+
+text.match(/^\w+/g);  // ["first"]  (only start of string)
+text.match(/^\w+/gm); // ["first", "second", "third"]  (each line)
+```
+
+Essential when processing multi-line strings like log files or config files.
+
+### `s` — DotAll (Single-line)
+
+By default, `.` does **not** match newline characters. With `s`, it matches everything including `\n`:
+
+```js
+/hello.world/.test("hello\nworld");  // false (. won't eat \n)
+/hello.world/s.test("hello\nworld"); // true  (s flag)
+```
+
+Useful for matching content that spans multiple lines.
+
+### `u` — Unicode
+
+Enables full Unicode support:
+- Patterns like `\p{L}` (any Unicode letter) become available
+- Surrogate pairs in the pattern are treated correctly
+- Some regex syntax errors are flagged instead of silently mismatched
+
+```js
+/\p{L}+/u.test("日本語");  // true — matches Unicode letters
+/\p{N}+/u.test("２４２"); // true — matches Unicode numerals
+```
+
+The `\p{...}` property escapes require the `u` flag.
+
+### `y` — Sticky
+
+Like `g`, but the match must start at exactly `regex.lastIndex`. If nothing matches at that precise position, the match fails (no scanning forward):
+
+```js
+const rx = /\d+/y;
+rx.lastIndex = 5;
+
+const result = rx.exec("abc 42 xyz");
+// Tries position 5: " 42 xyz" — space, not a digit → null
+```
+
+The `y` flag is useful for building **incremental parsers** where you process a string position by position.
+
+## Flag Combinations
+
+Flags can be combined freely:
+
+```js
+/^error.*/gim  // find all lines starting with "error" (any case, multiline)
+
+/\p{L}+/gu     // find all Unicode words globally
+
+/<div>.*?<\/div>/gis  // find all div elements including multiline content
+```
+
+## Python Flag Equivalents
+
+Python's `re` module uses slightly different names:
+
+| JavaScript | Python |
+|---|---|
+| `g` | `re.findall()` or `re.finditer()` |
+| `i` | `re.IGNORECASE` or `re.I` |
+| `m` | `re.MULTILINE` or `re.M` |
+| `s` | `re.DOTALL` or `re.S` |
+| `x` | `re.VERBOSE` or `re.X` |
+
+Python also has `re.VERBOSE` (the `x` flag) — allows comments and whitespace in patterns for readability:
+
+```python
+pattern = re.compile(r"""
+  \d{4}   # year
+  -       # separator
+  \d{2}   # month
+  -       # separator
+  \d{2}   # day
+""", re.VERBOSE)
+```
+
+## Try It
+
+Toggle the flags in the tester to see how they change match behavior:
+
+<RegexTester />
+
+## Related Topics
+
+- [Anchors](/programming/regex/anchors) — `^` and `$` behavior changes with `m` flag
+- [Character classes](/programming/regex/character-classes) — `i` flag affects ranges
+- [Common patterns](/programming/regex/common-patterns) — real patterns that rely on specific flags

@@ -1,0 +1,144 @@
+---
+title: Anchors
+description: Constrain where a pattern can match using ^ $ \b and \B — positional assertions that consume no characters.
+level: intermediate
+area: programming
+topic: regex
+---
+
+**Anchors** are zero-width assertions — they match a **position** in the string, not a character. They consume no characters from the input; they only check that the current position satisfies a condition.
+
+## Start and End of String
+
+| Anchor | Matches at |
+|---|---|
+| `^` | The beginning of the string |
+| `$` | The end of the string |
+
+```
+Pattern: ^Hello
+Input:  "Hello, world"  → matches
+Input:  "Say Hello"     → no match (Hello is not at start)
+
+Pattern: world$
+Input:  "Hello, world"  → matches
+Input:  "worldwide"     → no match (world is not at end)
+
+Pattern: ^Hello, world$
+Matches only: exactly "Hello, world" — nothing before, nothing after
+```
+
+These are essential for **validation** — asserting that the entire string conforms to a pattern rather than just finding a substring:
+
+```js
+// Validates entire string is a 4-digit year:
+/^\d{4}$/.test("2024")   // true
+/^\d{4}$/.test("x2024")  // false — ^ prevents prefix
+/^\d{4}$/.test("20245")  // false — $ prevents suffix
+```
+
+## Word Boundaries
+
+`\b` matches the position **between a word character (`\w`) and a non-word character** (or the start/end of the string). It is the boundary where a word begins or ends.
+
+```
+Pattern: \bcat\b
+Input:  "the cat sat"      → matches "cat"
+Input:  "concatenate"      → no match (no word boundary around "cat")
+Input:  "cats are great"   → no match ("cats" has no boundary after "cat")
+Input:  "a cat-nap"        → matches "cat" (hyphen is non-word)
+```
+
+`\B` is the opposite — it matches where `\b` does **not** match (inside a word):
+
+```
+Pattern: \Bcat\B
+Input:  "concatenate"    → matches (cat is embedded)
+Input:  "the cat sat"    → no match (cat is a whole word)
+```
+
+### Practical Uses of `\b`
+
+**Find whole-word matches only:**
+```
+Pattern: \bfor\b
+Avoids matching: "force", "afford", "before"
+```
+
+**Count occurrences of a word:**
+```js
+const count = text.match(/\bthe\b/gi)?.length ?? 0;
+```
+
+**Replace only standalone keywords:**
+```js
+code.replace(/\bfoo\b/g, "bar"); // Won't rename "fooBar" or "afoo"
+```
+
+## Multiline Mode
+
+By default, `^` and `$` match the start and end of the **entire string**. With the `m` (multiline) flag, they match the start and end of **each line**:
+
+```
+Input:
+  "first line
+   second line
+   third line"
+
+Pattern: ^\w+ (without m flag)
+Matches: "first" only (start of string)
+
+Pattern: ^\w+ (with m flag)
+Matches: "first", "second", "third" (start of each line)
+```
+
+```js
+const lines = "one\ntwo\nthree";
+lines.match(/^\w+/gm); // ["one", "two", "three"]
+```
+
+## `\z` and `\Z` (Language-Specific)
+
+Some engines support additional anchors:
+- `\Z` — end of string, before optional trailing newline (Python, Ruby)
+- `\z` — absolute end of string (no trailing newline exception)
+
+JavaScript does not support these; use `$` with the `m` flag off for end-of-string anchoring.
+
+## Combining Anchors
+
+Anchors can be combined with other patterns naturally:
+
+**CSV field at start of line:**
+```
+Pattern: ^\d+,
+Matches lines starting with a number followed by comma
+```
+
+**Blank line detection:**
+```
+Pattern: ^$
+Matches: empty lines (in multiline mode)
+```
+
+**Trim leading whitespace (replace):**
+```
+Pattern: ^\s+
+Replace with: ""
+```
+
+**Trim trailing whitespace (replace):**
+```
+Pattern: \s+$
+Replace with: ""
+```
+
+## Try It
+
+<RegexTester />
+
+## Related Topics
+
+- [Flags](/programming/regex/flags) — the `m` flag changes `^` and `$` behavior
+- [Lookaheads and lookbehinds](/programming/regex/lookaheads) — other zero-width assertions
+- [Groups and references](/programming/regex/groups) — grouping anchored sub-patterns
