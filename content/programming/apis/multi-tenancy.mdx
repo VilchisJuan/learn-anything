@@ -1,0 +1,312 @@
+---
+title: Multi-Tenancy
+description: Serving multiple organizations from a single system — the three isolation strategies, tenant resolution, and the data leakage traps to avoid.
+level: intermediate
+area: programming
+topic: apis
+---
+
+**Multi-tenancy** is an architecture where a single instance of a software application serves multiple customers (tenants). Each tenant's data is isolated from every other tenant's data, even though they share the same system.
+
+Examples: Slack (each company is a tenant), Shopify (each store is a tenant), GitHub (each organization is a tenant), Stripe (each business is a tenant).
+
+## Why Multi-Tenancy
+
+**Single-tenant:** deploy a separate system per customer. Simple isolation but expensive — you're managing N databases, N servers, N deployments.
+
+**Multi-tenant:** one system serves all customers. Economical, easier to maintain, but requires careful design to ensure isolation.
+
+The challenge: **one bug can expose Tenant A's data to Tenant B.** This is catastrophic — a data breach, regulatory violation, loss of trust. Isolation is not a nice-to-have; it is the core guarantee of the entire architecture.
+
+## Identifying a Tenant
+
+Before you can isolate data, you need to know which tenant a request belongs to. Common methods:
+
+### 1. Subdomain
+```
+acme.yoursaas.com      → tenant: "acme"
+globex.yoursaas.com    → tenant: "globex"
+```
+
+Parsed from the `Host` header:
+```ts
+function getTenantFromHost(host: string): string {
+  const subdomain = host.split(".")[0];
+  return subdomain; // "acme"
+}
+```
+
+### 2. Path Prefix
+```
+yoursaas.com/acme/api/...
+yoursaas.com/globex/api/...
+```
+
+### 3. Custom Domain (Domain Mapping)
+```
+api.acmecorp.com   → resolved to tenant "acme"  (stored in DNS/mapping table)
+```
+
+### 4. JWT Claim
+```json
+{
+  "sub": "usr_42",
+  "tenant_id": "acme",
+  "role": "admin"
+}
+```
+
+The `tenant_id` is extracted from the authenticated token. Most API-first SaaS products use this approach because it works across all client types without domain configuration.
+
+### Tenant Resolution Middleware
+
+```ts
+async function resolveTenant(req, res, next) {
+  const tenantId = req.user?.tenant_id; // from JWT
+  if (!tenantId) {
+    return res.status(401).json({ error: "Tenant not identified" });
+  }
+
+  const tenant = await tenantRepo.findById(tenantId);
+  if (!tenant || !tenant.active) {
+    return res.status(403).json({ error: "Tenant not found or inactive" });
+  }
+
+  req.tenant = tenant;
+  next();
+}
+```
+
+## The Three Isolation Strategies
+
+### Strategy 1: Row-Level Isolation (Shared Database, Shared Schema)
+
+All tenants share the same tables. Every table has a `tenant_id` column. Every query filters by `tenant_id`.
+
+```sql
+CREATE TABLE orders (
+  id          UUID PRIMARY KEY,
+  tenant_id   UUID NOT NULL,     ← the critical column
+  user_id     UUID NOT NULL,
+  total       DECIMAL,
+  created_at  TIMESTAMPTZ
+);
+
+CREATE INDEX orders_tenant_idx ON orders(tenant_id);
+```
+
+```ts
+// Every query must include tenant_id
+const orders = await db.query(
+  "SELECT * FROM orders WHERE tenant_id = $1 AND user_id = $2",
+  [req.tenant.id, req.user.id]
+);
+```
+
+**Pros:** simplest to implement, most economical, easy to deploy new tenants (no schema changes), best for large numbers of small tenants.
+
+**Cons:** one bug (forgetting `tenant_id` in a query) leaks all tenants' data. Requires meticulous discipline or tooling.
+
+**Defense:** use a query wrapper that automatically appends `tenant_id`:
+
+```ts
+class TenantScopedRepository {
+  constructor(private db: Pool, private tenantId: string) {}
+
+  async find(table: string, conditions: object) {
+    return this.db.query(
+      `SELECT * FROM ${table} WHERE tenant_id = $1 AND ...`,
+      [this.tenantId, ...]
+    );
+  }
+}
+
+// Usage — tenant_id is always injected, never forgettable:
+const repo = new TenantScopedRepository(db, req.tenant.id);
+const orders = await repo.find("orders", { user_id: req.user.id });
+```
+
+PostgreSQL's **Row Level Security (RLS)** is an even stronger defense — it enforces the `tenant_id` filter at the database level, so even a buggy query cannot return wrong-tenant data:
+
+```sql
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON orders
+  USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+```
+
+### Strategy 2: Schema-Level Isolation (Shared Database, Separate Schemas)
+
+Each tenant gets their own database schema (namespace). Same physical database server, but tables are prefixed with the tenant's schema:
+
+```sql
+-- Tenant "acme":
+CREATE SCHEMA acme;
+CREATE TABLE acme.orders (...);
+CREATE TABLE acme.users (...);
+
+-- Tenant "globex":
+CREATE SCHEMA globex;
+CREATE TABLE globex.orders (...);
+CREATE TABLE globex.users (...);
+```
+
+```ts
+// Set the schema for the current request:
+await db.query(`SET search_path TO ${tenantId}`);
+const orders = await db.query("SELECT * FROM orders"); // ← reads from acme.orders
+```
+
+**Pros:** strong isolation (impossible to accidentally query another tenant's data), easy to backup/restore individual tenants, schema migrations can be applied per-tenant.
+
+**Cons:** creating a new tenant requires a schema migration. Managing thousands of schemas becomes complex. Not all databases support this well.
+
+### Strategy 3: Database-Level Isolation (Separate Databases)
+
+Each tenant gets their own database (or even their own database server).
+
+```
+acme.postgres.yoursaas.com  → Tenant "acme" database
+globex.postgres.yoursaas.com → Tenant "globex" database
+```
+
+```ts
+// Connection routing:
+const tenantDbUrl = await getTenantDatabaseUrl(req.tenant.id);
+const tenantDb = createConnection(tenantDbUrl);
+const orders = await tenantDb.query("SELECT * FROM orders WHERE user_id = $1", [userId]);
+```
+
+**Pros:** maximum isolation, regulatory compliance (HIPAA, GDPR data residency), independent scaling per tenant, clean tenant offboarding (drop the database).
+
+**Cons:** most expensive, complex connection pooling (can't share connections across tenants), more infrastructure to manage.
+
+## Choosing a Strategy
+
+| Strategy | Best For | Isolation | Cost |
+|---|---|---|---|
+| Row-Level | Startups, SaaS with many small tenants | Lowest | Lowest |
+| Schema-Level | Mid-size SaaS, regulatory requirements | Medium | Medium |
+| Database-Level | Enterprise, HIPAA/GDPR, large tenants | Highest | Highest |
+
+Many companies start with row-level and migrate to schema or database isolation for high-value enterprise customers.
+
+## Connection Pooling in Multi-Tenant Systems
+
+With database-level isolation, you cannot use a single connection pool. You need **pool-per-tenant** or a **connection proxy** like PgBouncer that manages pools.
+
+```ts
+// Pool-per-tenant with lazy initialization:
+const pools = new Map<string, Pool>();
+
+function getPool(tenantId: string): Pool {
+  if (!pools.has(tenantId)) {
+    const config = getTenantDbConfig(tenantId);
+    pools.set(tenantId, new Pool(config));
+  }
+  return pools.get(tenantId)!;
+}
+```
+
+Cap the number of pools to avoid exhausting database connections. Consider a pool size limit or an LRU eviction strategy for inactive tenants.
+
+## Tenant Onboarding
+
+When a new tenant signs up, you need to provision their data:
+
+```ts
+async function provisionTenant(name: string, plan: Plan): Promise<Tenant> {
+  // 1. Create the tenant record
+  const tenant = await db.tenants.create({ name, plan, status: "active" });
+
+  // 2. (Schema strategy) Create their schema
+  await db.query(`CREATE SCHEMA "${tenant.id}"`);
+  await runMigrations(tenant.id);
+
+  // 3. Create the admin user
+  const adminUser = await createUser({
+    tenant_id: tenant.id,
+    role: "admin",
+    ...adminData
+  });
+
+  // 4. Send welcome email
+  await emailService.sendTenantWelcome(adminUser.email, tenant);
+
+  return tenant;
+}
+```
+
+## Tenant-Aware File Storage
+
+Files (uploads, exports) must also be isolated. Use tenant-prefixed paths in object storage:
+
+```
+S3 bucket: yoursaas-uploads/
+  acme/profile-pictures/user_42.jpg
+  acme/exports/report-2024-01.csv
+  globex/profile-pictures/user_99.jpg
+```
+
+```ts
+function getUploadPath(tenantId: string, filename: string): string {
+  return `${tenantId}/${filename}`;
+}
+// Never: just `filename` — this would mix tenant files
+```
+
+## Tenant-Aware Background Jobs
+
+When processing background jobs, always include `tenant_id` in the job payload and restore the tenant context in the worker:
+
+```ts
+// Enqueue:
+await queue.add("send-invoice", {
+  tenant_id: req.tenant.id,  // ← must be included
+  order_id: order.id,
+});
+
+// Worker:
+queue.process("send-invoice", async (job) => {
+  const tenant = await tenantRepo.findById(job.data.tenant_id);
+  const db = getPool(tenant.id);  // use the right database
+  const order = await db.orders.findById(job.data.order_id);
+  await invoiceService.send(order, tenant);
+});
+```
+
+## The Most Dangerous Anti-Pattern
+
+The worst thing you can do in a multi-tenant system:
+
+```ts
+// NEVER DO THIS:
+const allOrders = await db.query("SELECT * FROM orders");
+const tenantOrders = allOrders.filter(o => o.tenant_id === req.tenant.id);
+```
+
+This fetches ALL tenants' data from the database and filters in application code. It is a data leak waiting to happen (one line of code change exposes everything), and it destroys performance at scale.
+
+Always filter at the query level, not the application level.
+
+## Compliance and Data Residency
+
+Regulations like GDPR require that EU citizens' data stays in the EU. With row-level isolation, all tenants share one database — you cannot put EU data in a separate EU region.
+
+With database-level isolation, EU tenants can have databases in Frankfurt while US tenants use us-east-1:
+
+```ts
+function getTenantRegion(tenant: Tenant): string {
+  if (tenant.country_code in EU_COUNTRIES) return "eu-west-1";
+  return "us-east-1";
+}
+```
+
+This is one reason enterprises pay more for database-level isolation.
+
+## Related Topics
+
+- [Authorization](/programming/apis/authorization) — row-level access within a tenant
+- [Authentication](/programming/apis/authentication) — encoding tenant_id in JWTs
+- [Design Patterns](/programming/apis/design-patterns) — tenant-scoped repositories
+- [Security](/programming/apis/security) — preventing cross-tenant data leaks

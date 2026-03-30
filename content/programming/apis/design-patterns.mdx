@@ -1,0 +1,403 @@
+---
+title: Design Patterns
+description: The structural patterns every API codebase uses — Singleton, Repository, Service Layer, Dependency Injection, and more.
+level: intermediate
+area: programming
+topic: apis
+---
+
+Design patterns are reusable solutions to recurring structural problems. In API development, a handful of patterns appear in virtually every codebase. Understanding them lets you read any backend codebase quickly and build maintainable systems from day one.
+
+## Why Patterns Matter
+
+Without patterns, business logic ends up scattered across route handlers. Database calls mix with HTTP response formatting. Tests become impossible to write. Patterns give code a **predictable structure** — the right logic in the right place.
+
+## The Layers of an API
+
+Most production APIs separate concerns into distinct layers:
+
+```
+HTTP Request
+     │
+     ▼
+┌─────────────────┐
+│  Routes/Controllers │  ← Parse HTTP, validate input, call service
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Service Layer  │  ← Business logic, orchestration
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Repository     │  ← Database queries (no business logic)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Database       │  ← PostgreSQL, MongoDB, Redis...
+└─────────────────┘
+```
+
+Each layer has one responsibility and depends only on the layer below it.
+
+## Singleton Pattern
+
+A Singleton ensures a class has exactly **one instance**, shared across the entire application.
+
+In API development, this is used for expensive-to-create objects that should be reused:
+
+- Database connection pool
+- Redis client
+- HTTP API client (Stripe, SendGrid)
+- Configuration object
+
+```ts
+// db.ts — database singleton
+import { Pool } from "pg";
+
+let pool: Pool | null = null;
+
+export function getDb(): Pool {
+  if (!pool) {
+    pool = new Pool({
+      host: process.env.DB_HOST,
+      database: process.env.DB_NAME,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      max: 20, // max connections in pool
+    });
+  }
+  return pool;
+}
+```
+
+```ts
+// Usage anywhere in the app:
+import { getDb } from "./db";
+
+const db = getDb(); // always returns the same Pool instance
+const result = await db.query("SELECT * FROM users WHERE id = $1", [id]);
+```
+
+**Why not just `new Pool()` everywhere?**
+Each `new Pool()` creates new TCP connections to the database. A database can handle only ~100 connections. If 50 routes each create their own pool, you hit the limit instantly under load.
+
+### Module-Level Singleton (Node.js)
+
+Node.js modules are cached after the first `require`/`import`. This means a module-level export is effectively a singleton:
+
+```ts
+// redis.ts
+import { createClient } from "redis";
+
+// This runs ONCE when the module is first imported.
+export const redis = createClient({ url: process.env.REDIS_URL });
+await redis.connect();
+```
+
+```ts
+// anywhere in the app:
+import { redis } from "./redis";
+await redis.set("key", "value");
+// Every import gets the same connected client
+```
+
+## Repository Pattern
+
+Repositories abstract data access behind an interface. Business logic never writes SQL — it calls repository methods.
+
+```ts
+// repositories/user.repository.ts
+
+export interface UserRepository {
+  findById(id: string): Promise<User | null>;
+  findByEmail(email: string): Promise<User | null>;
+  findAll(filters: UserFilters): Promise<User[]>;
+  create(data: CreateUserData): Promise<User>;
+  update(id: string, data: Partial<User>): Promise<User>;
+  delete(id: string): Promise<void>;
+}
+
+export class PostgresUserRepository implements UserRepository {
+  constructor(private db: Pool) {}
+
+  async findById(id: string): Promise<User | null> {
+    const result = await this.db.query(
+      "SELECT * FROM users WHERE id = $1",
+      [id]
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async create(data: CreateUserData): Promise<User> {
+    const result = await this.db.query(
+      "INSERT INTO users (name, email, role) VALUES ($1, $2, $3) RETURNING *",
+      [data.name, data.email, data.role]
+    );
+    return result.rows[0];
+  }
+
+  // ... other methods
+}
+```
+
+**Benefits:**
+1. Business logic has no SQL — easier to read and test
+2. Swap databases by implementing the interface differently (e.g., `MongoUserRepository`)
+3. Testing: replace the real repository with an in-memory fake
+
+```ts
+// For tests:
+class InMemoryUserRepository implements UserRepository {
+  private users: User[] = [];
+
+  async findById(id: string) {
+    return this.users.find(u => u.id === id) ?? null;
+  }
+
+  async create(data: CreateUserData) {
+    const user = { id: uuid(), ...data };
+    this.users.push(user);
+    return user;
+  }
+  // ...
+}
+```
+
+## Service Layer Pattern
+
+Services contain business logic. They orchestrate repositories and other services to fulfill a use case.
+
+```ts
+// services/user.service.ts
+
+export class UserService {
+  constructor(
+    private userRepo: UserRepository,
+    private emailService: EmailService,
+  ) {}
+
+  async registerUser(data: RegisterUserData): Promise<User> {
+    // Business logic lives here
+    const existing = await this.userRepo.findByEmail(data.email);
+    if (existing) {
+      throw new ConflictError("Email already registered");
+    }
+
+    const hashedPassword = await bcrypt.hash(data.password, 10);
+    const user = await this.userRepo.create({
+      ...data,
+      password: hashedPassword,
+      role: "viewer",
+    });
+
+    await this.emailService.sendWelcomeEmail(user.email, user.name);
+
+    return user;
+  }
+
+  async deactivateUser(requesterId: string, targetId: string): Promise<void> {
+    const requester = await this.userRepo.findById(requesterId);
+    if (requester?.role !== "admin") {
+      throw new ForbiddenError("Only admins can deactivate users");
+    }
+
+    await this.userRepo.update(targetId, { active: false });
+  }
+}
+```
+
+The **route handler** is now thin — it only deals with HTTP:
+
+```ts
+// routes/users.ts
+router.post("/users/register", async (req, res) => {
+  const data = RegisterSchema.parse(req.body); // validate
+  const user = await userService.registerUser(data); // delegate
+  res.status(201).json(user); // respond
+});
+```
+
+The handler does not know about bcrypt, email sending, or role checks. That's the service's job.
+
+## Dependency Injection (DI)
+
+DI is the practice of providing dependencies to a class from the outside rather than having the class create them itself.
+
+```ts
+// Without DI — hard to test:
+class UserService {
+  private userRepo = new PostgresUserRepository(new Pool(...));
+  private emailService = new SendGridEmailService(process.env.SENDGRID_KEY);
+  // ^ tightly coupled to specific implementations
+}
+
+// With DI — injected from outside:
+class UserService {
+  constructor(
+    private userRepo: UserRepository,   // ← receives the dependency
+    private emailService: EmailService,
+  ) {}
+}
+
+// Wire it up at app startup:
+const db = getDb();
+const userRepo = new PostgresUserRepository(db);
+const emailService = new SendGridEmailService(process.env.SENDGRID_KEY);
+const userService = new UserService(userRepo, emailService);
+```
+
+Now in tests:
+```ts
+const mockRepo = new InMemoryUserRepository();
+const mockEmail = new FakeEmailService();
+const service = new UserService(mockRepo, mockEmail);
+
+// No real database or email needed
+```
+
+**DI Containers** (NestJS, InversifyJS, tsyringe) automate wiring:
+
+```ts
+// NestJS example:
+@Injectable()
+export class UserService {
+  constructor(
+    @InjectRepository(User) private userRepo: Repository<User>,
+    private emailService: EmailService,
+  ) {}
+}
+// NestJS automatically creates and injects the dependencies
+```
+
+## Factory Pattern
+
+Factories create objects when the creation logic is complex or conditional:
+
+```ts
+// notification.factory.ts
+function createNotificationService(config: AppConfig): NotificationService {
+  if (config.env === "test") {
+    return new FakeNotificationService();
+  }
+  if (config.notification_provider === "sendgrid") {
+    return new SendGridService(config.sendgrid_key);
+  }
+  if (config.notification_provider === "ses") {
+    return new SESService(config.aws_region);
+  }
+  throw new Error(`Unknown provider: ${config.notification_provider}`);
+}
+```
+
+The rest of the app calls `createNotificationService(config)` and receives the right implementation for the environment.
+
+## Middleware Pattern
+
+Middleware functions process requests in a pipeline. Each middleware does one job and passes control to the next. This is explored in detail in [Middleware](/programming/apis/middleware), but the pattern looks like:
+
+```ts
+// Each middleware:
+// 1. Receives (request, response, next)
+// 2. Does its work
+// 3. Calls next() to continue the chain OR sends a response to short-circuit
+
+app.use(requestLogger);       // log every request
+app.use(authenticate);        // verify JWT
+app.use(rateLimiter);         // check rate limit
+router.post("/orders", createOrderHandler);
+```
+
+## Command/Query Separation (CQRS Lite)
+
+Commands change state. Queries read state. Keep them separate.
+
+```ts
+// Commands (write operations):
+class CreateOrderCommand { constructor(public data: CreateOrderData) {} }
+class CancelOrderCommand { constructor(public orderId: string) {} }
+
+// Queries (read operations):
+class GetOrderQuery { constructor(public orderId: string) {} }
+class ListOrdersQuery { constructor(public filters: OrderFilters) {} }
+
+// Handlers:
+class CreateOrderHandler {
+  async handle(cmd: CreateOrderCommand): Promise<Order> { ... }
+}
+class GetOrderHandler {
+  async handle(query: GetOrderQuery): Promise<Order | null> { ... }
+}
+```
+
+The benefit: read paths and write paths can be optimized independently. Your write model can use a normalized relational DB; your read model can use a denormalized cache.
+
+Full **CQRS** (with event sourcing and separate read/write databases) is an advanced architecture. Most junior developers encounter the simpler form: just separating command objects from query objects.
+
+## The Data Transfer Object (DTO)
+
+A DTO is a plain object that carries data between layers. It has no methods — only properties.
+
+```ts
+// DTO for creating a user:
+interface CreateUserDTO {
+  name: string;
+  email: string;
+  password: string;
+}
+
+// DTO for the API response (never expose password hash):
+interface UserResponseDTO {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  created_at: string;
+}
+
+// Transform the database entity to the response DTO:
+function toUserResponse(user: UserEntity): UserResponseDTO {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    created_at: user.created_at.toISOString(),
+  };
+}
+```
+
+DTOs prevent internal fields (like `password_hash`, `deleted_at`, internal IDs) from leaking into API responses.
+
+## Putting It All Together
+
+A typical request flow:
+
+```
+POST /users HTTP/1.1
+
+→ Route handler
+    → Validates body against CreateUserDTO schema
+    → Calls userService.register(dto)
+
+  → UserService
+      → Checks for existing email via userRepo.findByEmail()
+      → Hashes password
+      → Calls userRepo.create()
+      → Calls emailService.sendWelcome()
+      → Returns User entity
+
+→ Route handler
+    → Transforms User entity to UserResponseDTO
+    → Returns 201 with DTO
+```
+
+Each layer touches only what it owns. None of the layers know about HTTP. The service could be called from a CLI, a queue worker, or a test — not just an HTTP handler.
+
+## Related Topics
+
+- [Middleware](/programming/apis/middleware) — the middleware pipeline in detail
+- [Testing](/programming/apis/testing) — how DI and repositories make testing possible
+- [Multi-Tenancy](/programming/apis/multi-tenancy) — applying these patterns in multi-tenant systems

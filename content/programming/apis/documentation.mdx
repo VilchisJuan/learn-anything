@@ -1,0 +1,425 @@
+---
+title: Documentation
+description: Writing API documentation that developers love — OpenAPI/Swagger spec, Postman collections, interactive docs, and documentation best practices.
+level: beginner
+area: programming
+topic: apis
+---
+
+Good API documentation is as important as the API itself. A poorly documented API — even a well-designed one — will frustrate developers, generate support tickets, and lose adoption. A well-documented API is a product in itself.
+
+## What Good Documentation Includes
+
+A complete API reference has:
+
+1. **Authentication** — how to get credentials, how to send them
+2. **Base URL** — where requests go, per environment
+3. **Endpoints** — every route, method, parameters, request/response schema
+4. **Error codes** — all possible error codes and what they mean
+5. **Rate limits** — how many requests per second/minute/day
+6. **Examples** — real, working code examples in multiple languages
+7. **Changelog** — what changed between versions
+8. **Getting started guide** — a 5-minute tutorial that actually works
+
+## OpenAPI Specification
+
+OpenAPI (formerly Swagger) is a standard format for describing REST APIs as a machine-readable document (YAML or JSON). Tools use this document to generate interactive documentation, client SDKs, server stubs, and tests.
+
+### Basic Structure
+
+```yaml
+openapi: 3.1.0
+info:
+  title: Shop API
+  version: 1.0.0
+  description: |
+    The Shop API lets you manage products, orders, and customers.
+
+    ## Authentication
+    All requests require a Bearer token in the Authorization header.
+  contact:
+    email: api@example.com
+  license:
+    name: MIT
+
+servers:
+  - url: https://api.example.com/v1
+    description: Production
+  - url: https://staging-api.example.com/v1
+    description: Staging
+
+security:
+  - bearerAuth: []     ← applied globally, can be overridden per endpoint
+```
+
+### Defining Endpoints (Paths)
+
+```yaml
+paths:
+  /users/{id}:
+    get:
+      summary: Get a user
+      description: Returns a single user by ID.
+      operationId: getUser
+      tags: [Users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: usr_42
+      responses:
+        "200":
+          description: The user object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+              example:
+                id: usr_42
+                name: Alice Johnson
+                email: alice@example.com
+                role: admin
+                created_at: "2024-01-15T10:30:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users:
+    post:
+      summary: Create a user
+      operationId: createUser
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+            example:
+              name: Bob Smith
+              email: bob@example.com
+              role: editor
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "409":
+          description: Email already in use
+```
+
+### Reusable Components
+
+```yaml
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      required: [id, name, email, role, created_at]
+      properties:
+        id:
+          type: string
+          example: usr_42
+        name:
+          type: string
+          example: Alice Johnson
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, editor, viewer]
+        created_at:
+          type: string
+          format: date-time
+
+    CreateUserRequest:
+      type: object
+      required: [name, email, role]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, editor, viewer]
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: not_found
+            message:
+              type: string
+            request_id:
+              type: string
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: unauthorized
+              message: Authentication required
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - properties:
+                  error:
+                    properties:
+                      details:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            field:
+                              type: string
+                            message:
+                              type: string
+```
+
+## Code-First vs Spec-First
+
+**Spec-first:** write the OpenAPI YAML file first, then generate server stubs. Useful for design discussions and client-first development.
+
+**Code-first:** write code and generate the OpenAPI spec from annotations. Keeps the spec in sync with the code.
+
+```ts
+// Code-first with TypeScript decorators (NestJS):
+@ApiTags("Users")
+@Controller("/users")
+export class UsersController {
+  @Get(":id")
+  @ApiOperation({ summary: "Get a user" })
+  @ApiParam({ name: "id", type: String })
+  @ApiResponse({ status: 200, type: UserResponseDto })
+  @ApiResponse({ status: 404, description: "User not found" })
+  async getUser(@Param("id") id: string): Promise<UserResponseDto> { ... }
+}
+```
+
+NestJS generates a complete OpenAPI spec at `/api-docs`. **Zod + express-openapi-validator** achieves the same in plain Express.
+
+## Swagger UI and Redoc
+
+The OpenAPI spec is machine-readable. Render it into interactive documentation:
+
+**Swagger UI:** the classic interface — try requests directly from the browser.
+
+```ts
+import swaggerUi from "swagger-ui-express";
+import swaggerDocument from "./openapi.json";
+
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument, {
+  customSiteTitle: "Shop API Docs",
+  swaggerOptions: {
+    persistAuthorization: true, // remember auth token across page refresh
+  },
+}));
+```
+
+**Redoc:** cleaner, read-optimized documentation with a three-column layout. Used by many public APIs.
+
+```html
+<!-- Serve Redoc as static HTML: -->
+<!DOCTYPE html>
+<html>
+  <head><title>Shop API Docs</title></head>
+  <body>
+    <redoc spec-url='/openapi.json'></redoc>
+    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+  </body>
+</html>
+```
+
+## Postman Collections
+
+Postman is the tool most developers use to test and explore APIs. Export a Postman collection so users can import it directly.
+
+A collection contains:
+- Folders organized by resource
+- Sample requests with example inputs
+- Environment variables for different environments (dev/staging/prod)
+- Pre-request scripts to auto-refresh tokens
+- Test scripts that verify response structure
+
+```json
+{
+  "info": { "name": "Shop API", "schema": "..." },
+  "variable": [
+    { "key": "base_url", "value": "https://api.example.com/v1" },
+    { "key": "token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get User",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/users/usr_42",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Convert between OpenAPI and Postman collections using `openapi-to-postmanv2`:
+```bash
+npx openapi-to-postmanv2 -s openapi.yaml -o collection.json
+```
+
+## Writing Excellent Descriptions
+
+A spec without good descriptions is just a schema. Descriptions should explain:
+
+- **What the endpoint does** — not just restates the method and path
+- **When to use it** — practical guidance
+- **Business rules** — "Only the owner or an admin can delete a post"
+- **Side effects** — "Sending this request sends an email to the user"
+- **Error scenarios** — explain what causes each error code
+
+```yaml
+# Bad description:
+summary: Delete user
+
+# Good description:
+summary: Delete a user account
+description: |
+  Permanently deletes a user account and all associated data.
+  This action cannot be undone.
+
+  Only admins and the account owner can delete an account.
+  Active subscriptions are cancelled automatically before deletion.
+  An email confirmation is sent to the user's address.
+
+  Returns `404` if the user doesn't exist or you don't have permission
+  to know it exists.
+```
+
+## Code Examples Are Mandatory
+
+Every endpoint should have working code examples in the languages your users care about.
+
+```yaml
+paths:
+  /users:
+    post:
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -X POST https://api.example.com/v1/users \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{"name":"Alice","email":"alice@example.com","role":"editor"}'
+
+        - lang: JavaScript
+          source: |
+            const response = await fetch('https://api.example.com/v1/users', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                name: 'Alice',
+                email: 'alice@example.com',
+                role: 'editor',
+              }),
+            });
+            const user = await response.json();
+
+        - lang: Python
+          source: |
+            import requests
+            response = requests.post(
+              'https://api.example.com/v1/users',
+              headers={'Authorization': f'Bearer {token}'},
+              json={'name': 'Alice', 'email': 'alice@example.com', 'role': 'editor'}
+            )
+            user = response.json()
+```
+
+## API Changelog
+
+Document every change. Developers need to understand what changed between versions:
+
+```markdown
+## Changelog
+
+### 2024-03-01
+- **BREAKING**: `user.id` changed from integer to `usr_`-prefixed string
+- **NEW**: Added `user.avatar_url` field to user responses
+- **DEPRECATED**: `GET /v1/users/search` — use `GET /v1/users?q=` instead
+
+### 2024-01-15
+- **NEW**: Added `PATCH /users/:id` for partial updates
+- **FIX**: `GET /orders` now correctly returns orders sorted by `created_at` descending
+```
+
+Tag each change as BREAKING, NEW, DEPRECATED, FIX, or IMPROVEMENT.
+
+## Getting Started Guide
+
+Your reference documentation is for looking things up. Your getting started guide teaches someone to use your API in 5 minutes:
+
+1. **Get credentials** — sign up, generate an API key
+2. **Make your first request** — one copy-pasteable `curl` command that works
+3. **Understand the response** — annotated example response
+4. **Common next steps** — links to the 3-4 most common use cases
+
+If your getting started guide takes more than 5 minutes to follow, simplify it.
+
+## Related Topics
+
+- [REST Design](/programming/apis/rest-design) — the conventions that make APIs self-documenting
+- [Versioning](/programming/apis/versioning) — documenting multiple API versions
+- [Testing](/programming/apis/testing) — using OpenAPI spec to drive contract tests
+- [Error Handling](/programming/apis/error-handling) — documenting error codes and formats

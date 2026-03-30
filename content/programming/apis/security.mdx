@@ -1,0 +1,338 @@
+---
+title: Security
+description: Protecting your API from real attacks — CORS, rate limiting, injection, OWASP API Security Top 10, and input validation.
+level: intermediate
+area: programming
+topic: apis
+---
+
+API security is not optional. Public APIs are under constant automated attack. Even internal APIs are targeted when attackers compromise internal networks. Understanding the attack surface and how to defend it is a non-negotiable skill.
+
+## CORS (Cross-Origin Resource Sharing)
+
+Browsers enforce the **same-origin policy**: JavaScript on `app.example.com` cannot call `api.other.com` by default. CORS is the mechanism that lets servers explicitly allow cross-origin requests.
+
+### How CORS Works
+
+For "simple" requests (GET/POST with basic headers), the browser sends the request and checks the response headers. For "preflighted" requests (PUT, DELETE, custom headers), the browser sends an `OPTIONS` request first:
+
+```
+Browser → OPTIONS https://api.example.com/orders
+          Origin: https://app.example.com
+
+API     → HTTP/1.1 204 No Content
+          Access-Control-Allow-Origin: https://app.example.com
+          Access-Control-Allow-Methods: GET, POST, PUT, DELETE
+          Access-Control-Allow-Headers: Authorization, Content-Type
+
+Browser → (now sends the actual request)
+```
+
+### CORS Headers
+
+```http
+# Allow a specific origin (preferred):
+Access-Control-Allow-Origin: https://app.example.com
+
+# Allow any origin (use only for truly public APIs):
+Access-Control-Allow-Origin: *
+
+# Allow credentials (cookies, auth headers):
+Access-Control-Allow-Credentials: true
+
+# Allowed methods:
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS
+
+# Allowed request headers:
+Access-Control-Allow-Headers: Authorization, Content-Type, X-Request-ID
+
+# Cache preflight response for 1 hour:
+Access-Control-Max-Age: 3600
+```
+
+**Important:** `Access-Control-Allow-Origin: *` and `Access-Control-Allow-Credentials: true` cannot be used together. Browsers reject this combination.
+
+### Common CORS Mistakes
+
+```js
+// Bad: allow any origin with credentials
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Credentials: true   ← browsers reject this
+
+// Bad: reflect the Origin header blindly
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", req.headers.origin); // ← any site can call this API
+  next();
+});
+
+// Good: whitelist known origins
+const allowedOrigins = ["https://app.example.com", "https://staging.example.com"];
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+  }
+  next();
+});
+```
+
+## Rate Limiting
+
+Without rate limiting, a single client can send millions of requests, flooding your server (accidental or intentional DoS) or performing brute-force attacks.
+
+### What to Limit
+
+| Target | Limit | Reason |
+|---|---|---|
+| Per IP, per minute | 100 req/min | Block bots and scrapers |
+| Per user, per hour | 1000 req/hr | Fair use enforcement |
+| Login attempts | 5 per 15 min | Prevent credential stuffing |
+| Password reset | 3 per hour | Prevent email bombing |
+| Expensive endpoints | Separate limits | `/search`, `/export`, `/ai` cost more |
+
+### Rate Limit Headers
+
+Always communicate limits to clients:
+
+```http
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 742
+X-RateLimit-Reset: 1705314600
+
+# When limit is exceeded:
+HTTP/1.1 429 Too Many Requests
+Retry-After: 60
+```
+
+### Algorithms
+
+**Fixed Window:** count requests per minute. Simple but has edge case — 100 requests at 11:59 and 100 at 12:00 are two separate windows but arrive within 1 second.
+
+**Sliding Window:** tracks the exact timestamp of each request over a rolling window. More accurate.
+
+**Token Bucket:** a bucket fills with tokens at a fixed rate. Each request consumes a token. Allows bursts (empty the bucket) while preventing sustained overload. Used by most production systems (AWS API Gateway, Cloudflare).
+
+```ts
+// Simple Redis-based token bucket
+async function checkRateLimit(userId: string): Promise<boolean> {
+  const key = `ratelimit:${userId}`;
+  const now = Date.now();
+  const window = 60 * 1000; // 1 minute
+  const limit = 100;
+
+  const count = await redis.incr(key);
+  if (count === 1) await redis.pexpire(key, window);
+  return count <= limit;
+}
+```
+
+## SQL Injection
+
+One of the most devastating attacks. An attacker injects SQL code into a parameter to manipulate database queries.
+
+```ts
+// Vulnerable:
+const query = `SELECT * FROM users WHERE email = '${req.body.email}'`;
+// If email = "' OR '1'='1", the query becomes:
+// SELECT * FROM users WHERE email = '' OR '1'='1'
+// → returns ALL users
+
+// Attacker can also drop tables:
+// email = "'; DROP TABLE users; --"
+```
+
+**Always use parameterized queries (prepared statements):**
+
+```ts
+// Safe — database driver handles escaping
+const user = await db.query(
+  "SELECT * FROM users WHERE email = $1",
+  [req.body.email]
+);
+
+// With an ORM (Prisma, TypeORM, Sequelize):
+const user = await prisma.user.findFirst({
+  where: { email: req.body.email }  // ← automatically parameterized
+});
+```
+
+ORMs do not protect you from raw query injection. If you use raw SQL strings anywhere in an ORM, apply the same parameterization rules.
+
+## Injection Attacks (Beyond SQL)
+
+The injection principle applies to any system that interprets data as code:
+
+| Type | Vector | Example |
+|---|---|---|
+| SQL Injection | Database | `'; DROP TABLE users; --` |
+| NoSQL Injection | MongoDB, etc. | `{ "$gt": "" }` in a query field |
+| Command Injection | Shell commands | `; rm -rf /` in a filename |
+| LDAP Injection | Directory queries | `*)(uid=*)` |
+| XML Injection | XML parsers | XXE (XML External Entity) attacks |
+| Template Injection | Server-side templates | `{{7*7}}` → `49` |
+
+**The rule:** never concatenate user input into interpreted strings. Always use parameterized/escaped methods provided by the library.
+
+## Input Validation
+
+Validate every input at the boundary — before it touches your business logic or database.
+
+```ts
+// Zod (TypeScript):
+const CreateUserSchema = z.object({
+  name: z.string().min(1).max(100),
+  email: z.string().email(),
+  age: z.number().int().min(0).max(150),
+  role: z.enum(["admin", "editor", "viewer"]),
+});
+
+app.post("/users", async (req, res) => {
+  const result = CreateUserSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ errors: result.error.errors });
+  }
+  // result.data is now safe to use
+  const user = await createUser(result.data);
+});
+```
+
+**Validation principles:**
+- Reject invalid input early (before processing)
+- Use allowlists over blocklists (define what IS valid, not what isn't)
+- Validate type, length, format, and range
+- Sanitize HTML if you store and display user-provided text (prevent XSS)
+
+## OWASP API Security Top 10
+
+The Open Web Application Security Project publishes the most common API security failures:
+
+### 1. Broken Object Level Authorization (BOLA)
+The most common. Accessing `/orders/42` when you own order 43. Always verify the resource belongs to the requesting user.
+
+```ts
+// Vulnerable:
+const order = await db.orders.findById(req.params.id);
+res.json(order); // ← no ownership check!
+
+// Safe:
+const order = await db.orders.findOne({
+  id: req.params.id,
+  user_id: req.user.id  // ← must belong to this user
+});
+if (!order) return res.status(404).json({ error: "Not found" });
+```
+
+### 2. Broken Authentication
+Weak tokens, missing expiry checks, insecure storage. See [Authentication](/programming/apis/authentication).
+
+### 3. Broken Object Property Level Authorization
+Returning fields the user shouldn't see, or accepting fields they shouldn't set.
+
+```ts
+// Vulnerable — user can set their own role:
+const updates = req.body; // { name: "Alice", role: "admin" }
+await db.users.update(userId, updates); // ← sets role to admin!
+
+// Safe — allowlist updatable fields:
+const { name, email } = req.body; // only these fields
+await db.users.update(userId, { name, email });
+```
+
+### 4. Unrestricted Resource Consumption
+No limits on request size, query depth (GraphQL), or processing time. A single request with a huge payload can take down your server.
+
+```ts
+// Limit request body size:
+app.use(express.json({ limit: "10kb" }));
+
+// Limit GraphQL query depth:
+// use graphql-depth-limit library
+```
+
+### 5. Broken Function Level Authorization
+Lower-privilege users accessing admin endpoints. Covered in [Authorization](/programming/apis/authorization).
+
+### 6. Unrestricted Access to Sensitive Business Flows
+No abuse protection on flows like account creation, coupon redemption, or voting. Rate limiting and CAPTCHAs apply here.
+
+### 7. Server-Side Request Forgery (SSRF)
+Your server fetches a URL provided by a user. An attacker provides an internal URL like `http://169.254.169.254/latest/meta-data/` (AWS metadata endpoint) to steal credentials.
+
+```ts
+// Vulnerable:
+const data = await fetch(req.body.url); // ← never fetch arbitrary URLs
+
+// Safe — validate and allowlist:
+const allowedDomains = ["api.trustedpartner.com"];
+const url = new URL(req.body.url);
+if (!allowedDomains.includes(url.hostname)) {
+  return res.status(400).json({ error: "Invalid URL" });
+}
+```
+
+### 8. Security Misconfiguration
+Default credentials, overly permissive CORS, verbose error messages, debug endpoints left on in production.
+
+```ts
+// Never expose stack traces in production:
+app.use((err, req, res, next) => {
+  console.error(err); // log internally
+  res.status(500).json({
+    error: "Internal server error"
+    // Never: message: err.message, stack: err.stack
+  });
+});
+```
+
+### 9. Improper Inventory Management
+Forgotten, undocumented, or old API versions with weaker security. Version your API and deprecate old versions properly.
+
+### 10. Unsafe Consumption of APIs
+Trusting external API responses without validation. If a third-party API you call returns unexpected data, your system should not break or be exploited.
+
+## HTTPS Everywhere
+
+Non-negotiable: all API traffic must be over HTTPS. Even internal traffic between services should be encrypted (zero-trust networks).
+
+Use **HSTS** (HTTP Strict Transport Security) to tell browsers to always use HTTPS:
+```http
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+```
+
+## Security Headers
+
+Add these headers to every API response:
+
+```http
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Content-Security-Policy: default-src 'none'
+Referrer-Policy: no-referrer
+```
+
+Libraries like `helmet` (Node.js) set these automatically.
+
+## Secrets Management
+
+Never store secrets in code, version control, or plaintext config files.
+
+```
+// Never:
+const DB_PASSWORD = "super-secret-password";
+const API_KEY = "sk_live_abc123";
+
+// Use environment variables:
+const DB_PASSWORD = process.env.DB_PASSWORD;
+
+// Or a secrets manager:
+// AWS Secrets Manager, HashiCorp Vault, GCP Secret Manager
+```
+
+Use `.env` files locally and a secrets manager in production. Add `.env` to `.gitignore` immediately.
+
+## Related Topics
+
+- [Authentication](/programming/apis/authentication) — token-based identity
+- [Authorization](/programming/apis/authorization) — permission enforcement
+- [Rate Limiting](/programming/apis/api-gateway) — applying limits at the gateway level
+- [Multi-Tenancy](/programming/apis/multi-tenancy) — tenant data isolation

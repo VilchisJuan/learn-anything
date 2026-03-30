@@ -1,0 +1,267 @@
+---
+title: REST Design
+description: How to design clean, predictable REST APIs — resource naming, CRUD mapping, relationships, pagination, and the six constraints of REST.
+level: beginner
+area: programming
+topic: apis
+---
+
+REST (Representational State Transfer) is an architectural style, not a protocol or standard. It was defined by Roy Fielding in his 2000 PhD dissertation. REST APIs that follow its principles are predictable, scalable, and easy to reason about. Ones that don't are the source of endless confusion.
+
+## The Six REST Constraints
+
+Fielding defined six constraints. Understanding them explains every design decision.
+
+1. **Client-Server** — the UI is separated from data storage. Each can evolve independently.
+2. **Stateless** — the server stores no client context between requests. Each request contains all information the server needs. This is why you send a token on every request rather than "logging in" once.
+3. **Cacheable** — responses must declare whether they can be cached. This enables CDNs and client-side caches.
+4. **Uniform Interface** — the most important constraint. All interactions follow the same conventions: resources have URIs, representations are transferred (not the resource itself), and messages are self-descriptive.
+5. **Layered System** — the client does not know if it's talking to the real server or a proxy, load balancer, or cache in between.
+6. **Code on Demand** (optional) — servers can send executable code to clients (e.g., JavaScript). Rarely used in modern APIs.
+
+In practice, "RESTful" means following the Uniform Interface constraint well. The rest are largely handled by HTTP and infrastructure.
+
+## Resources and URIs
+
+In REST, everything is a **resource** — a noun, not a verb. A URI identifies a resource. The HTTP method defines the action.
+
+### Naming Rules
+
+```
+/users           → collection of users
+/users/42        → a specific user
+/users/42/posts  → posts belonging to user 42
+/posts/7         → a specific post (also accessible directly)
+```
+
+**Use plural nouns:**
+```
+/users       ✓     (not /user)
+/orders      ✓     (not /order)
+/products    ✓     (not /getProducts)
+```
+
+**Use lowercase with hyphens for multi-word resources:**
+```
+/product-categories   ✓
+/productCategories    ✗ (camelCase in URLs looks odd)
+/product_categories   ✗ (underscores are technically fine but less common)
+```
+
+**Never use verbs in URLs — that's what HTTP methods are for:**
+```
+POST /createUser     ✗
+GET  /getUser/42     ✗
+POST /deleteUser/42  ✗
+
+POST   /users        ✓ (create)
+GET    /users/42     ✓ (read)
+PUT    /users/42     ✓ (replace)
+DELETE /users/42     ✓ (delete)
+```
+
+## CRUD Mapping
+
+The four CRUD operations map to HTTP methods and status codes:
+
+| Operation | Method | Path | Success Code | Notes |
+|---|---|---|---|---|
+| Create | `POST` | `/users` | `201 Created` | Return the created resource + `Location` header |
+| Read (list) | `GET` | `/users` | `200 OK` | Return an array (paginated) |
+| Read (single) | `GET` | `/users/42` | `200 OK` | Return the resource |
+| Update (replace) | `PUT` | `/users/42` | `200 OK` | Replaces the entire resource |
+| Update (partial) | `PATCH` | `/users/42` | `200 OK` | Updates only specified fields |
+| Delete | `DELETE` | `/users/42` | `204 No Content` | Return no body |
+
+### PUT vs PATCH
+
+`PUT` replaces the entire resource. If you `PUT` a user object without the `email` field, the email is erased. Use it when you have and are sending the complete resource.
+
+`PATCH` applies a partial update. Only the fields you send are changed. Use it for updating one or two fields without affecting the rest.
+
+```http
+// PATCH — only update the email
+PATCH /users/42
+{ "email": "new@example.com" }
+
+// PUT — must send the complete user
+PUT /users/42
+{
+  "name": "Alice",
+  "email": "new@example.com",
+  "role": "admin",
+  "created_at": "2024-01-01"
+}
+```
+
+## Nested Resources and Relationships
+
+When a resource belongs to another resource, nest it in the URL:
+
+```
+GET  /users/42/posts         → all posts by user 42
+POST /users/42/posts         → create a post for user 42
+GET  /users/42/posts/7       → post 7 by user 42
+DELETE /users/42/posts/7     → delete post 7 by user 42
+```
+
+**Keep nesting shallow (max 2 levels).** Deep nesting becomes hard to read and often means you need a direct route:
+
+```
+// Avoid deep nesting:
+GET /companies/1/departments/3/employees/42/tasks/8   ✗
+
+// Better — tasks are top-level with filtering:
+GET /tasks/8
+GET /tasks?employee_id=42
+```
+
+## Actions That Don't Fit CRUD
+
+Some operations are not clean CRUD operations. For example: "publish a post", "send a password reset email", "ban a user". Use a sub-resource or an action noun:
+
+```
+POST /posts/7/publish            → action on a resource
+POST /users/42/password-reset    → trigger a process
+POST /orders/123/cancel          → transition state
+```
+
+This keeps the verb-free URL convention while still handling non-CRUD operations.
+
+## Query Parameters for Filtering, Sorting, and Pagination
+
+```
+GET /products?category=electronics
+GET /products?sort=price&order=asc
+GET /products?in_stock=true&max_price=100
+
+// Pagination
+GET /users?page=2&limit=20        → page-based
+GET /users?cursor=abc123&limit=20 → cursor-based (better for large datasets)
+```
+
+### Pagination Response
+
+Always include metadata so clients know if there are more pages:
+
+```json
+{
+  "data": [...],
+  "pagination": {
+    "page": 2,
+    "limit": 20,
+    "total": 143,
+    "total_pages": 8,
+    "next_cursor": "eyJpZCI6NDJ9"
+  }
+}
+```
+
+**Cursor-based pagination** is preferred for large, frequently updated datasets. Page numbers break when items are inserted or deleted between requests. A cursor points to a stable position in the dataset.
+
+## Response Structure
+
+Be consistent. Every response should have a predictable shape.
+
+### Successful response:
+
+```json
+{
+  "id": "usr_42",
+  "name": "Alice Johnson",
+  "email": "alice@example.com",
+  "role": "admin",
+  "created_at": "2024-01-15T10:30:00Z"
+}
+```
+
+### Collection response:
+
+```json
+{
+  "data": [
+    { "id": "usr_42", "name": "Alice" },
+    { "id": "usr_43", "name": "Bob" }
+  ],
+  "meta": {
+    "total": 2,
+    "page": 1
+  }
+}
+```
+
+### Date and time format
+
+Always use **ISO 8601** with UTC timezone:
+```json
+"created_at": "2024-01-15T10:30:00Z"    ✓
+"created_at": "01/15/2024"              ✗ (ambiguous, timezone unknown)
+"created_at": 1705314600               ✗ (Unix timestamps are fine for machines, not humans)
+```
+
+## HATEOAS (Hypermedia)
+
+The "H" in REST's Uniform Interface. Responses include links to related actions, so clients don't need to hard-code URLs.
+
+```json
+{
+  "id": "ord_456",
+  "status": "pending",
+  "_links": {
+    "self": { "href": "/orders/ord_456" },
+    "cancel": { "href": "/orders/ord_456/cancel", "method": "POST" },
+    "payment": { "href": "/orders/ord_456/payment" }
+  }
+}
+```
+
+In practice, full HATEOAS is rarely implemented in most production REST APIs. But the idea — that your API is self-descriptive and discoverable — is worth understanding.
+
+## Common Anti-Patterns to Avoid
+
+```
+// Verb in URL
+GET /getUser/42       ✗  →  GET /users/42       ✓
+POST /createUser      ✗  →  POST /users         ✓
+
+// Leaking database internals
+GET /users?sql=SELECT+*+FROM+users    ✗ (security nightmare)
+GET /tbl_user/42                      ✗ (don't expose table names)
+
+// Inconsistent naming
+GET /users                ← plural
+GET /product              ← singular ← inconsistent!
+
+// Overly chatty API
+GET /user/name
+GET /user/email
+GET /user/address         ← too granular, one request should suffice
+GET /users/42             ← return the whole user ✓
+
+// Ignoring HTTP semantics
+GET /users/42 (when deleting)  ← do not use GET for side effects
+```
+
+## Real-World Example: Order API
+
+```
+GET    /orders                     → list orders (with filters)
+POST   /orders                     → place an order
+GET    /orders/ord_456             → get order details
+PATCH  /orders/ord_456             → update order (e.g., shipping address)
+POST   /orders/ord_456/cancel      → cancel the order
+GET    /orders/ord_456/items       → items in the order
+POST   /orders/ord_456/items       → add item to order
+DELETE /orders/ord_456/items/7     → remove item from order
+GET    /orders/ord_456/invoice     → download invoice
+POST   /orders/ord_456/refund      → request a refund
+```
+
+Every URL is a noun. Every action is expressed through the HTTP method or a sub-resource action noun. This API is predictable — a developer can guess URLs correctly on the first try.
+
+## Related Topics
+
+- [HTTP Fundamentals](/programming/apis/http-fundamentals) — the methods and status codes used in REST
+- [Versioning](/programming/apis/versioning) — how to evolve a REST API without breaking clients
+- [Error Handling](/programming/apis/error-handling) — standardized error response format for REST
+- [Authentication](/programming/apis/authentication) — securing REST endpoints

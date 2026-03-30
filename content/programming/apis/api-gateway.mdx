@@ -1,0 +1,374 @@
+---
+title: API Gateway
+description: The gateway pattern — routing, load balancing, reverse proxy, rate limiting, auth offloading, and the tradeoffs between monolith and microservices.
+level: intermediate
+area: programming
+topic: apis
+---
+
+An **API Gateway** is a server that sits in front of your backend services and acts as the single entry point for all client requests. It handles cross-cutting concerns — routing, authentication, rate limiting, SSL termination — so individual services don't have to.
+
+## The Problem It Solves
+
+Without a gateway, every client needs to know about every service:
+
+```
+Mobile App → https://users.internal:3001/users/42
+Mobile App → https://orders.internal:3002/orders/
+Mobile App → https://products.internal:3003/products/
+```
+
+Problems: internal URLs exposed to clients, every service must implement auth/rate-limiting/CORS independently, no central monitoring.
+
+With a gateway:
+
+```
+Mobile App → https://api.example.com/users/42
+           → https://api.example.com/orders/
+           → https://api.example.com/products/
+
+Gateway routes internally:
+  /users/*    → users-service:3001
+  /orders/*   → orders-service:3002
+  /products/* → products-service:3003
+```
+
+One URL for clients. All complexity hidden.
+
+## Reverse Proxy vs API Gateway
+
+A **reverse proxy** forwards client requests to upstream servers. It handles load balancing and SSL. nginx and HAProxy are reverse proxies.
+
+An **API gateway** does everything a reverse proxy does, plus:
+- Authentication and authorization
+- Rate limiting per user/API key
+- Request/response transformation
+- Protocol translation (HTTP → gRPC)
+- Analytics and monitoring
+- API versioning
+- Developer portal
+
+Popular API gateways: **Kong**, **AWS API Gateway**, **Cloudflare Workers**, **Traefik**, **nginx** (with plugins).
+
+## Core Responsibilities
+
+### 1. Routing
+
+Map incoming URLs to upstream services:
+
+```yaml
+# Kong or similar gateway config:
+routes:
+  - name: users-service
+    paths: ["/api/v1/users"]
+    upstream: users-service:3001
+
+  - name: orders-service
+    paths: ["/api/v1/orders"]
+    upstream: orders-service:3002
+
+  - name: products-service
+    paths: ["/api/v1/products"]
+    upstream: products-service:3003
+```
+
+Advanced routing based on headers, methods, or request body:
+
+```yaml
+routes:
+  - path: "/api/v1/payments"
+    method: POST
+    upstream: payments-service:3004
+
+  - path: "/api/v1/payments"
+    method: GET
+    upstream: payment-history-service:3005  # reads go to a separate read replica service
+```
+
+### 2. Load Balancing
+
+Distribute traffic across multiple instances of a service:
+
+```nginx
+upstream orders_service {
+  least_conn;                    # send to server with fewest connections
+  server orders-service-1:3002;
+  server orders-service-2:3002;
+  server orders-service-3:3002;
+  keepalive 32;                  # reuse connections
+}
+
+server {
+  location /api/v1/orders {
+    proxy_pass http://orders_service;
+  }
+}
+```
+
+**Load balancing algorithms:**
+
+| Algorithm | Description | Best For |
+|---|---|---|
+| Round Robin | Take turns | Homogeneous services |
+| Least Connections | Send to least busy | Variable request durations |
+| IP Hash | Same IP → same server | Sticky sessions (WebSockets) |
+| Weighted | Some servers get more traffic | Canary deploys |
+| Random | Random server | Simple, stateless services |
+
+### 3. SSL/TLS Termination
+
+The gateway handles HTTPS. Internal service-to-service traffic can be HTTP (within a trusted private network).
+
+```nginx
+server {
+  listen 443 ssl;
+  ssl_certificate /etc/ssl/cert.pem;
+  ssl_certificate_key /etc/ssl/key.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+
+  location /api/ {
+    proxy_pass http://internal-services;  # plain HTTP internally
+  }
+}
+```
+
+This simplifies internal services — they don't need to manage certificates. All TLS complexity is centralized.
+
+### 4. Authentication Offloading
+
+Validate JWTs at the gateway. Only authenticated requests reach services. Services trust the gateway.
+
+```yaml
+# Kong JWT plugin:
+plugins:
+  - name: jwt
+    config:
+      secret_is_base64: false
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+```
+
+The gateway verifies the token and forwards the decoded claims as headers:
+
+```
+X-User-ID: usr_42
+X-User-Role: admin
+X-Tenant-ID: acme
+```
+
+Services receive these headers and use them without re-verifying the JWT. This means services don't need the JWT secret — tighter security.
+
+### 5. Rate Limiting
+
+Centralized rate limiting across all services:
+
+```yaml
+# Kong rate limiting plugin:
+plugins:
+  - name: rate-limiting
+    config:
+      second: 10       # 10 req/s per consumer
+      minute: 300      # 300 req/min per consumer
+      hour: 10000      # 10k req/hour per consumer
+      policy: redis    # shared state across gateway instances
+```
+
+Without central rate limiting, each service instance would need to coordinate — complex and error-prone.
+
+### 6. Request/Response Transformation
+
+Modify requests and responses in transit:
+
+```yaml
+# Add headers before forwarding:
+plugins:
+  - name: request-transformer
+    config:
+      add:
+        headers:
+          - X-Request-ID: $(uuid)
+          - X-Forwarded-By: api-gateway
+
+# Remove internal headers from responses:
+  - name: response-transformer
+    config:
+      remove:
+        headers:
+          - X-Internal-Server-ID
+          - X-Database-Query-Time
+```
+
+This is useful for:
+- Adding correlation IDs to every request
+- Stripping internal headers before sending to clients
+- Renaming fields for backwards compatibility
+
+## The Gateway Pattern in Microservices
+
+In a microservices architecture, the gateway is the only externally visible service:
+
+```
+Internet
+   │
+   ▼
+┌──────────────────────────────┐
+│         API Gateway          │  (public)
+│  Auth | Rate Limit | Routing │
+└──────────┬───────────────────┘
+           │
+    ───────┼───────────────────────────────
+    │      │            │                │
+    ▼      ▼            ▼                ▼
+ Users   Orders      Products       Notifications
+Service  Service      Service         Service
+  │        │            │
+  ▼        ▼            ▼
+UserDB  OrdersDB    ProductsDB    (private databases)
+```
+
+Internal services:
+- Are not exposed to the internet
+- Trust headers forwarded by the gateway
+- Communicate with each other via gRPC or internal HTTP
+
+## Service-to-Service Auth
+
+When Service A calls Service B internally, they use **mTLS** (mutual TLS) or a **service token** — not user JWTs:
+
+```ts
+// Service A calling Service B:
+const serviceToken = await tokenService.generateServiceToken("orders-service");
+
+const response = await fetch("http://products-service/internal/products/123", {
+  headers: {
+    "Authorization": `Bearer ${serviceToken}`,
+    "X-Service-Name": "orders-service",
+  }
+});
+```
+
+Service tokens are short-lived and scoped to service-to-service calls. They are separate from user authentication.
+
+## Circuit Breaking at the Gateway
+
+The gateway can detect failing upstream services and stop routing to them:
+
+```yaml
+# Kong circuit breaker (via upstream health checks):
+upstreams:
+  - name: payments-service
+    healthchecks:
+      active:
+        http_path: /health
+        healthy:
+          interval: 10        # check every 10s
+          successes: 2        # 2 successes → mark healthy
+        unhealthy:
+          interval: 5
+          http_failures: 3    # 3 failures → mark unhealthy
+```
+
+When the payments service is unhealthy, the gateway returns `503 Service Unavailable` immediately without attempting to forward the request.
+
+## API Gateway vs BFF (Backend for Frontend)
+
+A generic API gateway routes to many services. A **BFF (Backend for Frontend)** is a purpose-built gateway for a specific client type.
+
+```
+Mobile App → Mobile BFF (optimized for mobile: small payloads, offline-first)
+Web App    → Web BFF (returns full data for rich UI)
+Third-party → Public API Gateway (stable, versioned)
+```
+
+BFFs aggregate data from multiple microservices into one response optimized for the client:
+
+```ts
+// Web BFF: combines user + orders + recommendations in one request
+app.get("/dashboard", async (req, res) => {
+  const [user, orders, recommendations] = await Promise.all([
+    userService.get(req.user.id),
+    orderService.getRecent(req.user.id),
+    recommendationService.getForUser(req.user.id),
+  ]);
+  res.json({ user, orders, recommendations });
+});
+```
+
+Without a BFF, the client would make 3 separate requests.
+
+## nginx as a Reverse Proxy (Practical)
+
+For smaller setups, nginx serves as both reverse proxy and basic gateway:
+
+```nginx
+server {
+  listen 80;
+  server_name api.example.com;
+  return 301 https://$host$request_uri;  # force HTTPS
+}
+
+server {
+  listen 443 ssl http2;
+  server_name api.example.com;
+
+  ssl_certificate /etc/letsencrypt/live/api.example.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
+
+  # Rate limiting:
+  limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+
+  location /api/v1/ {
+    limit_req zone=api burst=20 nodelay;
+
+    proxy_pass http://localhost:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # Timeouts:
+    proxy_connect_timeout 10s;
+    proxy_send_timeout 30s;
+    proxy_read_timeout 30s;
+  }
+
+  # Health check — no auth, no rate limit:
+  location /health {
+    proxy_pass http://localhost:3000/health;
+  }
+}
+```
+
+## Health Checks
+
+Every service behind a gateway should expose a health endpoint:
+
+```ts
+app.get("/health", async (req, res) => {
+  const dbOk = await checkDatabaseConnection();
+  const redisOk = await checkRedisConnection();
+
+  const status = dbOk && redisOk ? "ok" : "degraded";
+  const code = status === "ok" ? 200 : 503;
+
+  res.status(code).json({
+    status,
+    version: process.env.APP_VERSION,
+    checks: {
+      database: dbOk ? "ok" : "error",
+      redis: redisOk ? "ok" : "error",
+    }
+  });
+});
+```
+
+The gateway polls this endpoint and removes unhealthy instances from rotation.
+
+## Related Topics
+
+- [Connection Methods](/programming/apis/connection-methods) — WebSocket proxying at the gateway
+- [Security](/programming/apis/security) — rate limiting, auth offloading
+- [Middleware](/programming/apis/middleware) — application-level equivalent of gateway concerns
+- [Multi-Tenancy](/programming/apis/multi-tenancy) — tenant routing at the gateway

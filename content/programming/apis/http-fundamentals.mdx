@@ -1,0 +1,271 @@
+---
+title: HTTP Fundamentals
+description: The protocol behind every web API — methods, status codes, headers, and the full request/response lifecycle.
+level: beginner
+area: programming
+topic: apis
+---
+
+HTTP (HyperText Transfer Protocol) is the foundation of web communication. Every REST API, every browser request, and most service-to-service calls use it. Understanding HTTP at a deep level is the single most valuable skill for API development.
+
+## The Request/Response Lifecycle
+
+Every HTTP interaction follows this sequence:
+
+```
+1. DNS resolution        → "api.example.com" → 93.184.216.34
+2. TCP connection        → three-way handshake (SYN / SYN-ACK / ACK)
+3. TLS handshake         → negotiate encryption (HTTPS only)
+4. Send request          → method + path + headers + optional body
+5. Server processes      → routes, validates, queries DB, builds response
+6. Receive response      → status code + headers + body
+7. Connection close      → or kept alive for reuse (Keep-Alive)
+```
+
+Understanding this pipeline tells you where latency hides: DNS lookups, TCP setup, TLS negotiation. This is why `Connection: keep-alive` and HTTP/2 multiplexing matter — they reuse the expensive TCP/TLS connection across many requests.
+
+## HTTP Methods (Verbs)
+
+Methods declare **intent**. They tell the server what the client wants to do.
+
+| Method | Meaning | Has Body | Idempotent | Safe |
+|---|---|---|---|---|
+| `GET` | Retrieve a resource | No | Yes | Yes |
+| `POST` | Create a resource / submit data | Yes | No | No |
+| `PUT` | Replace a resource entirely | Yes | Yes | No |
+| `PATCH` | Partially update a resource | Yes | No | No |
+| `DELETE` | Remove a resource | No | Yes | No |
+| `HEAD` | Like GET but returns only headers | No | Yes | Yes |
+| `OPTIONS` | Ask what methods are allowed | No | Yes | Yes |
+
+**Idempotent** means calling the method multiple times produces the same result as calling it once. `PUT /users/42` with the same body always results in the same user state — it's safe to retry on network failure. `POST /orders` is not idempotent — retrying creates duplicate orders.
+
+**Safe** means the method does not modify state. `GET` and `HEAD` should never cause side effects.
+
+### Common Mistakes
+
+```
+// Wrong: using GET with a body to filter
+GET /users  { "role": "admin" }  ← body on GET is ignored or rejected
+
+// Right: use query parameters
+GET /users?role=admin
+
+// Wrong: using POST for everything
+POST /getUser
+POST /deleteUser
+
+// Right: use the correct verb
+GET /users/42
+DELETE /users/42
+```
+
+## Status Codes
+
+Status codes are three-digit numbers that tell the client what happened. They are grouped by category.
+
+### 2xx — Success
+
+| Code | Meaning | When to Use |
+|---|---|---|
+| `200 OK` | Request succeeded | GET, PUT, PATCH responses with a body |
+| `201 Created` | Resource was created | POST that creates something |
+| `204 No Content` | Success, nothing to return | DELETE, PUT that returns no body |
+| `202 Accepted` | Request accepted, processing async | Long-running background jobs |
+
+### 3xx — Redirection
+
+| Code | Meaning |
+|---|---|
+| `301 Moved Permanently` | URL has changed forever; update your bookmarks |
+| `302 Found` | Temporary redirect |
+| `304 Not Modified` | Cached version is still valid (used with ETags) |
+
+### 4xx — Client Error
+
+These mean **the client did something wrong**.
+
+| Code | Meaning |
+|---|---|
+| `400 Bad Request` | Malformed syntax, invalid parameters |
+| `401 Unauthorized` | Not authenticated (no or invalid token) |
+| `403 Forbidden` | Authenticated but not permitted |
+| `404 Not Found` | Resource does not exist |
+| `405 Method Not Allowed` | Wrong HTTP method for this endpoint |
+| `409 Conflict` | Resource already exists (duplicate) |
+| `422 Unprocessable Entity` | Valid syntax but business logic rejected it |
+| `429 Too Many Requests` | Rate limit exceeded |
+
+The `401` vs `403` distinction trips up many developers. **401** means "I don't know who you are — please authenticate." **403** means "I know who you are, but you cannot do this."
+
+### 5xx — Server Error
+
+These mean **the server did something wrong**.
+
+| Code | Meaning |
+|---|---|
+| `500 Internal Server Error` | Unhandled exception; check server logs |
+| `502 Bad Gateway` | Upstream service returned an invalid response |
+| `503 Service Unavailable` | Server is overloaded or down for maintenance |
+| `504 Gateway Timeout` | Upstream service did not respond in time |
+
+## HTTP Headers
+
+Headers are key-value pairs that carry metadata about the request or response. They are separated from the body by a blank line.
+
+### Request Headers
+
+```http
+GET /users/42 HTTP/1.1
+Host: api.example.com
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
+Accept: application/json
+Content-Type: application/json
+User-Agent: MyApp/2.0
+Accept-Encoding: gzip, deflate
+```
+
+| Header | Purpose |
+|---|---|
+| `Authorization` | Carry auth token or credentials |
+| `Content-Type` | Format of the request body |
+| `Accept` | Format the client wants in the response |
+| `Host` | Which host the request is for (required in HTTP/1.1) |
+| `User-Agent` | Identifies the client software |
+| `X-Request-ID` | Unique ID for distributed tracing |
+
+### Response Headers
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: max-age=3600
+ETag: "abc123"
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 987
+```
+
+| Header | Purpose |
+|---|---|
+| `Content-Type` | Format of the response body |
+| `Cache-Control` | How long to cache the response |
+| `ETag` | Version identifier for cache validation |
+| `Location` | URL of a newly created resource (201 responses) |
+| `Retry-After` | When to retry after a 429 or 503 |
+
+### Custom Headers
+
+By convention, custom headers use `X-` prefix (though this is no longer required). Many APIs use them for:
+
+```http
+X-Request-ID: 550e8400-e29b-41d4-a716-446655440000
+X-Tenant-ID: acme-corp
+X-API-Version: 2024-01-15
+```
+
+## The Request Anatomy
+
+```
+POST /api/v1/orders HTTP/1.1          ← Request line: method + path + protocol
+Host: api.shop.com                     ← Headers (required)
+Authorization: Bearer eyJ...           ←
+Content-Type: application/json         ←
+Content-Length: 87                     ←
+                                       ← Blank line separates headers from body
+{                                      ← Body (optional, depends on method)
+  "product_id": "prod_789",
+  "quantity": 2,
+  "shipping_address": "123 Main St"
+}
+```
+
+## The Response Anatomy
+
+```
+HTTP/1.1 201 Created                   ← Status line: protocol + code + reason phrase
+Content-Type: application/json         ← Headers
+Location: /api/v1/orders/ord_456       ←
+                                       ← Blank line
+{                                      ← Body
+  "id": "ord_456",
+  "status": "pending",
+  "total": 49.99,
+  "created_at": "2024-01-15T10:30:00Z"
+}
+```
+
+## Query Parameters vs Path Parameters
+
+**Path parameters** identify a specific resource:
+```
+GET /users/42          → user with ID 42
+GET /orders/ord_456    → order ord_456
+```
+
+**Query parameters** filter, sort, or paginate a collection:
+```
+GET /users?role=admin&page=2&limit=20
+GET /products?category=electronics&sort=price_asc&in_stock=true
+```
+
+A common convention:
+- Use path params for required identifiers: `/users/{id}`
+- Use query params for optional filters and options: `?status=active`
+
+## HTTP/1.1 vs HTTP/2 vs HTTP/3
+
+| Feature | HTTP/1.1 | HTTP/2 | HTTP/3 |
+|---|---|---|---|
+| Transport | TCP | TCP | QUIC (UDP) |
+| Multiplexing | No (one request per connection) | Yes | Yes |
+| Header compression | No | HPACK | QPACK |
+| Server push | No | Yes | Yes |
+| Encryption | Optional | De facto mandatory | Mandatory |
+
+**HTTP/2** solved the major bottleneck of HTTP/1.1: **head-of-line blocking**. In HTTP/1.1, if one request is slow, everything behind it waits. HTTP/2 multiplexes many requests over a single connection simultaneously.
+
+**HTTP/3** replaces TCP with QUIC, which is built on UDP. This eliminates TCP's own head-of-line blocking and makes connections survive network changes (e.g., switching from WiFi to cellular) without reconnecting.
+
+As a developer, you don't need to implement these protocols yourself — your web server (nginx, Caddy) or cloud provider handles it. But knowing they exist explains why gRPC is fast (HTTP/2) and why mobile APIs benefit from HTTP/3.
+
+## HTTPS and TLS
+
+**HTTPS** is HTTP with a **TLS** (Transport Layer Security) layer. TLS provides:
+
+1. **Encryption** — data in transit cannot be read by a third party
+2. **Authentication** — the client verifies it's talking to the real server (via certificates)
+3. **Integrity** — data cannot be tampered with in transit
+
+Every production API must use HTTPS. Sending API keys, tokens, or user data over plain HTTP exposes them to network-level interception.
+
+```
+// Never do this in production:
+http://api.example.com/users
+
+// Always:
+https://api.example.com/users
+```
+
+## Content Negotiation
+
+A client can tell the server what format it wants:
+
+```http
+Accept: application/json          ← prefer JSON
+Accept: application/xml           ← prefer XML
+Accept: application/json, text/plain;q=0.9   ← JSON first, plain text as fallback
+```
+
+The server responds with the best format it supports, indicated via `Content-Type`:
+
+```http
+Content-Type: application/json; charset=utf-8
+```
+
+In practice, most modern APIs default to JSON and ignore `Accept` headers entirely. But understanding content negotiation is useful when building APIs that must support multiple formats.
+
+## Related Topics
+
+- [REST Design](/programming/apis/rest-design) — how to design clean, predictable endpoints using these HTTP primitives
+- [Authentication](/programming/apis/authentication) — how tokens are carried in the `Authorization` header
+- [Caching](/programming/apis/caching) — deep dive into `Cache-Control`, `ETag`, and `Last-Modified`

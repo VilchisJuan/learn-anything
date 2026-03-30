@@ -1,0 +1,286 @@
+---
+title: API Versioning
+description: Evolving an API without breaking clients — URL versioning, header versioning, deprecation strategies, and how to plan a breaking change.
+level: beginner
+area: programming
+topic: apis
+---
+
+APIs are contracts. Once you release an API and clients start using it, you cannot freely change it — you risk breaking those clients. **API versioning** is the strategy for evolving your API while honoring that contract.
+
+## What Is a Breaking Change?
+
+A **breaking change** requires existing clients to update their code to keep working.
+
+| Change | Breaking? |
+|---|---|
+| Remove an endpoint | Yes |
+| Rename a field | Yes |
+| Change a field's type (`string` → `number`) | Yes |
+| Make an optional field required | Yes |
+| Remove a field from the response | Yes |
+| Change an error code | Yes |
+| Add a new optional field to a response | No |
+| Add a new optional request field | No |
+| Add a new endpoint | No |
+| Improve performance | No |
+| Fix a bug (behavior was wrong) | Debatable |
+
+**Non-breaking changes** can be deployed without a version bump. **Breaking changes** require a new version.
+
+## The Three Versioning Strategies
+
+### 1. URL Path Versioning
+
+The version number is embedded in the URL path. The most common strategy.
+
+```
+https://api.example.com/v1/users
+https://api.example.com/v2/users
+```
+
+```ts
+// Express routing:
+const v1Router = express.Router();
+v1Router.get("/users", v1UserHandler);
+v1Router.get("/users/:id", v1GetUserHandler);
+
+const v2Router = express.Router();
+v2Router.get("/users", v2UserHandler); // different implementation
+v2Router.get("/users/:id", v2GetUserHandler);
+
+app.use("/v1", v1Router);
+app.use("/v2", v2Router);
+```
+
+**Pros:** explicit, visible, easy to test (just change the URL), cacheable by CDN.
+**Cons:** URLs are supposed to identify resources, not API versions (philosophically impure). Proliferates if not managed.
+
+Used by: Stripe (`/v1/`), Twilio, GitHub (`/v3/`), most major APIs.
+
+### 2. Header Versioning
+
+The version is specified in a custom request header.
+
+```http
+GET /users HTTP/1.1
+API-Version: 2024-01-15
+```
+
+```ts
+app.get("/users", (req, res) => {
+  const version = req.headers["api-version"] ?? "2023-01-01";
+
+  if (version >= "2024-01-15") {
+    return v2GetUsersHandler(req, res);
+  }
+  return v1GetUsersHandler(req, res);
+});
+```
+
+Stripe uses **date-based versions** with header pinning — each API key is pinned to the version that existed when you first called the API:
+
+```http
+Stripe-Version: 2023-10-16
+```
+
+**Pros:** clean URLs (the URL identifies the resource, not the version).
+**Cons:** less visible (easy to forget you're on v1), CDN caching is tricky (version is in header, not URL).
+
+### 3. Accept Header (Content Negotiation)
+
+Use the `Accept` header with a vendor media type:
+
+```http
+Accept: application/vnd.example.v2+json
+```
+
+```ts
+app.get("/users", (req, res) => {
+  const accept = req.headers.accept ?? "";
+
+  if (accept.includes("vnd.example.v2")) {
+    return v2GetUsersHandler(req, res);
+  }
+  return v1GetUsersHandler(req, res);
+});
+```
+
+**Pros:** follows HTTP standards precisely.
+**Cons:** verbose and awkward to use; rarely used in practice.
+
+## Choosing a Strategy
+
+For most APIs, **URL path versioning** is the right choice. It's explicit, easy to test with a browser or curl, and widely understood.
+
+Use **header versioning** if:
+- URL cleanliness is very important
+- You have very frequent small changes (Stripe's approach)
+- You want to pin each client to a specific behavior snapshot
+
+## Date-Based vs Integer Versions
+
+**Integer versions** (`v1`, `v2`, `v3`) are coarse. `v2` implies a large, significant change.
+
+**Date-based versions** (`2024-01-15`) are granular. Stripe releases a new version with every breaking change, allowing clients to adopt changes one at a time.
+
+```
+2023-10-16   ← initial version
+2023-11-15   ← added new field to payment intent
+2024-01-15   ← changed user object shape
+2024-03-01   ← deprecated old webhook format
+```
+
+Clients pin to a specific date. When they're ready to adopt a change, they bump to the next date version.
+
+## What Goes in a New Version
+
+Not every change needs a full version. Minor additive changes are backwards compatible and require no version bump. Only **breaking changes** need a new version.
+
+```
+v1 → v2 migrations:
+
+v1 response:
+{
+  "id": 42,
+  "name": "Alice Johnson",
+  "address": "123 Main St, New York, NY"   ← single string
+}
+
+v2 response:
+{
+  "id": "usr_42",                           ← changed from int to prefixed string
+  "first_name": "Alice",                    ← renamed
+  "last_name": "Johnson",                   ← renamed
+  "address": {                              ← changed from string to object
+    "street": "123 Main St",
+    "city": "New York",
+    "state": "NY"
+  }
+}
+```
+
+Three breaking changes: ID type, field names, address format. All require `v2`.
+
+## Versioning Internal Structure
+
+Keep version-specific logic separate. Don't scatter `if (version === "v2")` checks throughout your codebase.
+
+```
+src/
+  routes/
+    v1/
+      users.ts
+      orders.ts
+    v2/
+      users.ts
+      orders.ts
+  services/
+    user.service.ts    ← shared, version-independent business logic
+  repositories/
+    user.repo.ts       ← shared
+```
+
+v1 and v2 routes can call the same service layer. The service returns a consistent internal model. Each version's router transforms that model into its specific response shape:
+
+```ts
+// v2/users.ts
+router.get("/:id", async (req, res) => {
+  const user = await userService.get(req.params.id); // shared service
+
+  // v2 response transformation:
+  res.json({
+    id: `usr_${user.id}`,
+    first_name: user.name.split(" ")[0],
+    last_name: user.name.split(" ").slice(1).join(" "),
+    address: parseAddress(user.address),
+  });
+});
+```
+
+## Deprecation
+
+Versioning without deprecation leads to supporting old versions forever. You need a deprecation lifecycle:
+
+### 1. Announce deprecation
+
+Add `Deprecation` and `Sunset` headers to deprecated endpoints:
+
+```http
+Deprecation: Sat, 01 Jan 2025 00:00:00 GMT
+Sunset: Sat, 01 Jul 2025 00:00:00 GMT
+Link: <https://docs.example.com/migration/v2>; rel="deprecation"
+```
+
+`Deprecation` — when the version was marked deprecated.
+`Sunset` — when it will stop working.
+
+### 2. Communicate to clients
+
+Email registered developers. Log a warning when deprecated endpoints are called. Update documentation with a migration guide. Give at least 6–12 months notice for public APIs.
+
+### 3. Monitor usage
+
+Before shutting down a version, verify usage has dropped to near zero:
+
+```ts
+// Log every deprecated endpoint call:
+function deprecationWarning(sunset: string) {
+  return (req, res, next) => {
+    console.warn({
+      event: "deprecated_endpoint_called",
+      path: req.path,
+      user_id: req.user?.id,
+      sunset,
+    });
+    res.setHeader("Deprecation", "true");
+    res.setHeader("Sunset", sunset);
+    next();
+  };
+}
+
+v1Router.use(deprecationWarning("2025-07-01"));
+```
+
+### 4. Sunset
+
+On the sunset date, return `410 Gone` instead of the actual response:
+
+```ts
+// After sunset date:
+v1Router.all("*", (req, res) => {
+  res.status(410).json({
+    error: {
+      code: "api_version_sunset",
+      message: "API v1 has been retired. Please migrate to v2.",
+      docs: "https://docs.example.com/migration/v2",
+    }
+  });
+});
+```
+
+`410 Gone` (not `404 Not Found`) — it signals permanent removal.
+
+## Versioning a Single Resource
+
+Not every endpoint needs to change when you release a new version. You can version individual endpoints:
+
+```
+GET /v1/users/42    ← v1 format
+GET /v2/users/42    ← v2 format
+
+GET /v1/orders/123  ← stays at v1 (no changes needed)
+GET /v2/orders/123  ← redirect or alias to v1 (same behavior)
+```
+
+## Internal vs External APIs
+
+**Public APIs** (used by third parties) need strict versioning. You have no control over when clients update.
+
+**Internal APIs** (used only by your own services) can be more flexible. If you control all consumers, you can coordinate updates without versioning. But versioning is still useful for zero-downtime deploys.
+
+## Related Topics
+
+- [REST Design](/programming/apis/rest-design) — resource naming and URL design
+- [Documentation](/programming/apis/documentation) — documenting multiple API versions with OpenAPI
+- [API Gateway](/programming/apis/api-gateway) — routing requests to different version services

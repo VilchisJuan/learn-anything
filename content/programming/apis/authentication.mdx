@@ -1,0 +1,299 @@
+---
+title: Authentication
+description: Proving who you are — API keys, JWT tokens, OAuth2 flows, and session-based auth explained from first principles.
+level: intermediate
+area: programming
+topic: apis
+---
+
+**Authentication** answers the question: **who are you?** It is the process of verifying identity before granting access to an API. Without authentication, any person or service could call your API and do anything.
+
+Do not confuse authentication with [authorization](/programming/apis/authorization) — they are different. Authentication is identity. Authorization is what that identity is allowed to do.
+
+## The Three Factors
+
+Every authentication method is based on one or more of:
+
+1. **Something you know** — password, PIN, secret answer
+2. **Something you have** — phone (TOTP code), hardware key, certificate
+3. **Something you are** — fingerprint, face ID
+
+**Multi-factor authentication (MFA)** requires at least two factors. Even if a password is stolen, an attacker still needs the second factor.
+
+## API Keys
+
+The simplest form of API authentication. A long random string issued to a client that acts as both identity and credential.
+
+```http
+GET /data HTTP/1.1
+Authorization: Bearer sk_live_4a8f2c...
+```
+
+Or as a query parameter (less secure — keys appear in server logs and browser history):
+
+```http
+GET /data?api_key=sk_live_4a8f2c...   ← avoid this pattern
+```
+
+### How They Work
+
+1. Developer registers and receives an API key
+2. Key is stored securely in the application (environment variable, secret manager)
+3. Key is sent with every request
+4. Server looks up the key in its database, finds the associated account, grants access
+
+### Pros and Cons
+
+| Pro | Con |
+|---|---|
+| Simple to implement | No expiration by default |
+| Easy to rotate | If leaked, full access until revoked |
+| Good for server-to-server | Cannot represent a user without a separate mechanism |
+| Stateless | Requires secure storage by the consumer |
+
+API keys work well for server-to-server calls where a service authenticates to another service. They are used by Stripe, Twilio, SendGrid, and most developer-focused APIs.
+
+**Never hard-code API keys in source code.** Use environment variables:
+
+```js
+// Bad:
+const client = new StripeClient("sk_live_4a8f2c...");
+
+// Good:
+const client = new StripeClient(process.env.STRIPE_SECRET_KEY);
+```
+
+## Basic Authentication
+
+The oldest HTTP authentication scheme. Encodes `username:password` in Base64 and sends it in the `Authorization` header.
+
+```http
+Authorization: Basic dXNlcjpwYXNzd29yZA==
+```
+
+`dXNlcjpwYXNzd29yZA==` decodes to `user:password`. **This is not encryption.** It is trivially reversible.
+
+Basic Auth is acceptable only over HTTPS (where TLS encrypts the header in transit) and only for specific use cases like internal tools. Never use it for public-facing APIs.
+
+## JWT (JSON Web Tokens)
+
+JWT is the most common authentication mechanism for modern APIs. A JWT is a **self-contained token** that carries claims (assertions about the user) and is cryptographically signed.
+
+### Structure
+
+A JWT looks like this:
+
+```
+eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c3JfNDIiLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3MDUzMTQ2MDB9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+```
+
+It is three Base64URL-encoded parts separated by dots:
+
+```
+HEADER.PAYLOAD.SIGNATURE
+```
+
+**Header:** algorithm and token type
+```json
+{
+  "alg": "HS256",
+  "typ": "JWT"
+}
+```
+
+**Payload:** the claims (data about the user)
+```json
+{
+  "sub": "usr_42",        ← subject (user ID)
+  "role": "admin",
+  "email": "alice@example.com",
+  "exp": 1705314600,      ← expiration (Unix timestamp)
+  "iat": 1705311000       ← issued at
+}
+```
+
+**Signature:** ensures the token was not tampered with
+```
+HMACSHA256(
+  base64url(header) + "." + base64url(payload),
+  secret_key
+)
+```
+
+### Why JWTs are Powerful
+
+The server does **not** need to look up the token in a database on every request. It verifies the signature using the secret key. If the signature is valid, the token is authentic and the claims can be trusted.
+
+This is what makes JWTs **stateless** — perfect for distributed systems where multiple servers need to validate tokens without sharing session state.
+
+### JWT Authentication Flow
+
+```
+1. User logs in:
+   POST /auth/login  { email, password }
+
+2. Server validates credentials, creates JWT:
+   { sub: "usr_42", role: "admin", exp: now + 1h }
+   Signs with secret key → returns token
+
+3. Client stores token (localStorage, memory, httpOnly cookie)
+
+4. Client sends token on every subsequent request:
+   Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
+
+5. Server validates signature + expiry → reads claims → grants access
+```
+
+### Access Tokens and Refresh Tokens
+
+Access tokens are short-lived (15 minutes to 1 hour). If stolen, the damage is limited.
+
+Refresh tokens are long-lived (days to weeks) and are used only to get new access tokens. They are stored more securely (httpOnly cookie, never in JavaScript-accessible storage).
+
+```
+Access token:   15 min lifetime, sent in Authorization header
+Refresh token:  7 day lifetime, sent in httpOnly cookie to /auth/refresh only
+```
+
+When the access token expires:
+```
+POST /auth/refresh
+Cookie: refresh_token=...
+→ 200 { access_token: "new JWT..." }
+```
+
+### JWT Pitfalls
+
+**Never store sensitive data in the payload.** The payload is Base64-encoded, not encrypted. Anyone can decode it:
+```js
+atob("eyJzdWIiOiJ1c3JfNDIiLCJyb2xlIjoiYWRtaW4ifQ==")
+// → {"sub":"usr_42","role":"admin"}
+```
+
+**Validate the `exp` claim.** An expired token must be rejected.
+
+**Use strong secrets or asymmetric keys.** `HS256` uses a shared secret. `RS256` uses a public/private key pair — the server signs with the private key, and any service can verify with the public key without needing the private key.
+
+**The `alg: none` vulnerability.** Some early JWT libraries accepted tokens with `"alg": "none"` and no signature. Always enforce the expected algorithm.
+
+## OAuth2
+
+OAuth2 is not an authentication protocol — it is an **authorization delegation protocol**. It allows users to grant a third-party application access to their resources without sharing their password.
+
+The most common example: "Sign in with Google." You grant an app access to your Google profile without giving the app your Google password.
+
+### Key Roles
+
+- **Resource Owner** — the user who owns the data
+- **Client** — the application requesting access (your app)
+- **Authorization Server** — issues tokens (Google, GitHub, Auth0)
+- **Resource Server** — the API serving protected resources
+
+### OAuth2 Flows
+
+**Authorization Code Flow** (for web apps and mobile apps):
+
+```
+1. Your app redirects user to Google:
+   https://accounts.google.com/o/oauth2/auth?
+     client_id=...&redirect_uri=...&scope=email+profile&response_type=code
+
+2. User logs in and consents on Google's page
+
+3. Google redirects back to your app with a code:
+   https://yourapp.com/callback?code=4/P7q7W91a-oMsCeLvIaQm6bTrgtp7
+
+4. Your server exchanges the code for tokens:
+   POST https://oauth2.googleapis.com/token
+   { code, client_id, client_secret, redirect_uri, grant_type: "authorization_code" }
+   → { access_token, refresh_token, id_token }
+
+5. Your server uses access_token to call Google APIs on behalf of the user
+```
+
+The code is short-lived and single-use. The actual tokens are never exposed to the browser.
+
+**Client Credentials Flow** (for machine-to-machine, no user involved):
+
+```
+POST /oauth/token
+{ client_id, client_secret, grant_type: "client_credentials", scope: "read:data" }
+→ { access_token, expires_in }
+```
+
+This is like an API key but with scopes and expiration built in. Used for service-to-service calls.
+
+## OpenID Connect (OIDC)
+
+OAuth2 tells you that a user authorized access, but not who the user is. **OIDC** is a thin identity layer on top of OAuth2 that adds an `id_token` (a JWT) containing the user's identity.
+
+When you "Sign in with Google," you're using OIDC. The `id_token` gives you:
+```json
+{
+  "sub": "1234567890",
+  "name": "Alice Johnson",
+  "email": "alice@gmail.com",
+  "picture": "https://...",
+  "iss": "https://accounts.google.com",
+  "aud": "your-client-id",
+  "exp": 1705314600
+}
+```
+
+You verify this token using Google's public keys, then create a session or your own JWT for the user.
+
+## Session-Based Authentication
+
+The traditional web approach. The server stores session state, the client holds only a session ID.
+
+```
+1. User logs in
+2. Server creates session, stores: { userId: 42, role: "admin" }
+3. Server sends session ID in a cookie:
+   Set-Cookie: session_id=abc123; HttpOnly; Secure; SameSite=Lax
+
+4. Browser automatically sends cookie on every request:
+   Cookie: session_id=abc123
+
+5. Server looks up session_id in session store (Redis, DB)
+   → retrieves userId, role, grants access
+```
+
+**Pros:** Easy to revoke (delete the session). No token expiry edge cases.
+**Cons:** Requires shared session storage in distributed systems (all servers need Redis). Does not scale as elegantly as JWTs.
+
+### Session Security Flags
+
+```
+Set-Cookie: session_id=abc123;
+  HttpOnly;          ← JavaScript cannot read it (XSS protection)
+  Secure;            ← Only sent over HTTPS
+  SameSite=Lax;      ← Not sent on cross-site requests (CSRF protection)
+  Max-Age=86400      ← Expires in 24 hours
+```
+
+## Comparing Authentication Methods
+
+| Method | Stateless | Good For | Revocation |
+|---|---|---|---|
+| API Key | Yes | Server-to-server | Immediate (delete from DB) |
+| Session | No | Web apps (traditional) | Immediate (delete session) |
+| JWT | Yes | SPAs, mobile, microservices | Hard (wait for expiry or denylist) |
+| OAuth2 | Yes | Third-party access delegation | Token revocation endpoint |
+
+## Where to Store Tokens (Frontend)
+
+| Storage | XSS Safe | CSRF Safe | Notes |
+|---|---|---|---|
+| `localStorage` | No | Yes | Token accessible to any JS |
+| `sessionStorage` | No | Yes | Cleared when tab closes |
+| Memory (JS variable) | Yes (mostly) | Yes | Lost on page refresh |
+| `httpOnly` cookie | Yes | No (need SameSite) | Best for session IDs and refresh tokens |
+
+For access tokens in SPAs: store in memory (a React context or a module variable). Use `httpOnly` cookies for refresh tokens. This gives you XSS protection on the refresh token while keeping the access token out of persistent storage.
+
+## Related Topics
+
+- [Authorization](/programming/apis/authorization) — what an authenticated user can do
+- [Security](/programming/apis/security) — CORS, rate limiting, and other protections
+- [Multi-Tenancy](/programming/apis/multi-tenancy) — isolating users by organization

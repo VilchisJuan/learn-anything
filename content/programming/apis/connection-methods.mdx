@@ -1,0 +1,354 @@
+---
+title: Connection Methods
+description: Beyond request-response — WebSockets, Server-Sent Events, long polling, short polling, and HTTP/2 server push compared.
+level: intermediate
+area: programming
+topic: apis
+---
+
+HTTP request-response is the default connection model: client asks, server answers, connection closes (or is reused). But many real-world features require data to flow from server to client without the client asking — notifications, live scores, chat messages, real-time dashboards.
+
+This lesson covers every connection method you'll encounter and when to use each.
+
+## The Problem with Poll-Based Approaches
+
+If you need live data and only have HTTP, the naive approach is polling — the client repeatedly asks "anything new?"
+
+```
+Client: GET /notifications/new  (every 5 seconds)
+Server: 200 { notifications: [] }  ← usually empty
+Server: 200 { notifications: [] }
+Server: 200 { notifications: [{ message: "..." }] }
+```
+
+This works but is wasteful: most responses are empty and each request carries full HTTP overhead (headers, TLS, etc.).
+
+## Short Polling
+
+The client sends requests on a timer.
+
+```ts
+// Client:
+setInterval(async () => {
+  const { notifications } = await fetch("/notifications/new").then(r => r.json());
+  if (notifications.length > 0) renderNotifications(notifications);
+}, 5000); // every 5 seconds
+```
+
+**Pros:** simple, no special server support.
+**Cons:** high server load, stale data (up to polling interval), wasteful bandwidth.
+
+**When to use:** when simplicity matters and latency of seconds is acceptable. Status pages, non-critical background refresh.
+
+## Long Polling
+
+The client sends a request, and the server **holds the response** until data is available or a timeout occurs.
+
+```
+Client → GET /notifications/stream (timeout: 30s)
+Server holds connection...
+...10 seconds later, new notification arrives...
+Server → 200 { notifications: [...] }
+
+Client → GET /notifications/stream (immediately reconnects)
+...
+```
+
+```ts
+// Server (Express):
+app.get("/notifications/stream", async (req, res) => {
+  const timeout = 30000; // 30 second max hold time
+  const startTime = Date.now();
+  const userId = req.user.id;
+
+  while (Date.now() - startTime < timeout) {
+    const notifications = await notificationService.getPending(userId);
+
+    if (notifications.length > 0) {
+      return res.json({ notifications });
+    }
+
+    await sleep(500); // check every 500ms
+  }
+
+  res.json({ notifications: [] }); // timeout — return empty
+});
+```
+
+**Pros:** near-real-time without persistent connections, works through HTTP proxies and load balancers.
+**Cons:** holds server connections (resource cost), complex error handling on reconnect.
+
+**When to use:** when WebSockets aren't available or when the event rate is low (rare updates).
+
+## Server-Sent Events (SSE)
+
+A one-way, persistent HTTP connection where the server streams events to the client. Built on HTTP; no special protocol upgrade needed.
+
+```
+GET /events HTTP/1.1
+Accept: text/event-stream
+
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+
+data: {"type":"notification","message":"You have a new message"}
+
+data: {"type":"order_update","orderId":"ord_456","status":"shipped"}
+
+id: 42
+data: {"type":"price_update","symbol":"AAPL","price":182.45}
+
+: heartbeat
+
+```
+
+### SSE Format
+
+Each event is a set of fields separated by `\n`, events separated by `\n\n`:
+
+```
+id: {event-id}         ← optional, enables Last-Event-ID reconnection
+event: {event-type}    ← optional event name (default: "message")
+data: {payload}        ← the data (one line per field, or multi-line)
+retry: {ms}            ← optional reconnection interval hint
+                       ← blank line ends the event
+```
+
+### Server Implementation
+
+```ts
+app.get("/events", authenticate, (req, res) => {
+  // Set SSE headers:
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders(); // send headers immediately
+
+  const userId = req.user.id;
+
+  // Subscribe this client to events:
+  const unsubscribe = eventBus.subscribe(userId, (event) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  });
+
+  // Heartbeat to keep connection alive through proxies:
+  const heartbeat = setInterval(() => {
+    res.write(": heartbeat\n\n");
+  }, 15000);
+
+  // Cleanup when client disconnects:
+  req.on("close", () => {
+    unsubscribe();
+    clearInterval(heartbeat);
+  });
+});
+```
+
+### Client Implementation
+
+```ts
+const es = new EventSource("/events");
+
+es.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  handleEvent(data);
+};
+
+es.addEventListener("order_update", (event) => {
+  const { orderId, status } = JSON.parse(event.data);
+  updateOrderStatus(orderId, status);
+});
+
+es.onerror = () => {
+  // Browser automatically reconnects with Last-Event-ID header
+};
+```
+
+**Pros:** simple, built on HTTP (works through firewalls/proxies), automatic reconnection with `Last-Event-ID`, no library needed on the client.
+**Cons:** one-way only (server → client), limited to text, HTTP/1.1 limit of 6 connections per domain.
+
+**When to use:** notifications, live feeds, progress updates, dashboards — any time data flows one way.
+
+## WebSockets
+
+A full-duplex, persistent connection. Either side can send messages at any time. After an initial HTTP handshake, the connection is upgraded to the WebSocket protocol.
+
+```
+Client → GET /chat HTTP/1.1
+         Upgrade: websocket
+         Connection: Upgrade
+         Sec-WebSocket-Key: ...
+
+Server → HTTP/1.1 101 Switching Protocols
+         Upgrade: websocket
+         Connection: Upgrade
+
+[Connection is now a WebSocket — HTTP is no longer used]
+
+Client ←→ Server: binary or text frames, any direction, any time
+```
+
+### Server Implementation
+
+```ts
+import { WebSocketServer } from "ws";
+
+const wss = new WebSocketServer({ server: httpServer });
+
+wss.on("connection", (ws, req) => {
+  const userId = authenticateWsRequest(req);
+
+  ws.on("message", (message) => {
+    const data = JSON.parse(message.toString());
+
+    if (data.type === "chat_message") {
+      broadcastToRoom(data.roomId, {
+        type: "chat_message",
+        from: userId,
+        text: data.text,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
+  ws.on("close", () => {
+    removeFromRooms(userId);
+  });
+
+  ws.on("error", (err) => {
+    console.error("WebSocket error:", err);
+  });
+});
+
+function broadcastToRoom(roomId: string, message: unknown) {
+  const payload = JSON.stringify(message);
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN && clientRooms.get(client)?.includes(roomId)) {
+      client.send(payload);
+    }
+  });
+}
+```
+
+### Client Implementation
+
+```ts
+const ws = new WebSocket("wss://api.example.com/chat");
+
+ws.onopen = () => {
+  ws.send(JSON.stringify({ type: "join", roomId: "general" }));
+};
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === "chat_message") {
+    renderMessage(data);
+  }
+};
+
+ws.onclose = (event) => {
+  if (!event.wasClean) {
+    setTimeout(reconnect, 3000); // reconnect with backoff
+  }
+};
+```
+
+### Scaling WebSockets
+
+The problem: WebSocket connections are stateful and tied to a specific server instance. If a user is connected to Server A and sends a message to a user connected to Server B, Server A doesn't know about that connection.
+
+**Solution: pub/sub through Redis:**
+
+```ts
+// When a message arrives on Server A:
+ws.on("message", async (msg) => {
+  const data = JSON.parse(msg.toString());
+  // Publish to Redis channel:
+  await redis.publish(`room:${data.roomId}`, JSON.stringify({
+    ...data,
+    from: userId,
+  }));
+});
+
+// All servers subscribe to Redis channels:
+const subscriber = redis.duplicate();
+await subscriber.subscribe("room:general", (message) => {
+  // Broadcast to all connected clients on this server:
+  broadcast(message);
+});
+```
+
+**Pros:** true bidirectional, low latency (no HTTP overhead per message), efficient for high-frequency updates.
+**Cons:** stateful (scaling requires coordination), firewalls may block WebSocket traffic, more complex error handling and reconnection logic.
+
+**When to use:** chat, collaborative editing, multiplayer games, trading terminals — any feature with high-frequency bidirectional communication.
+
+## HTTP/2 Server Push
+
+HTTP/2 allows the server to push resources to the client before the client asks for them. Primarily useful for pushing CSS and JS alongside an HTML page, not for API event streaming.
+
+```
+Client → GET /page.html
+Server → 200 /page.html
+Server → PUSH /styles.css  (before client asks for it)
+Server → PUSH /app.js
+```
+
+Browser support for HTTP/2 push is declining (Chrome removed it). For APIs, SSE and WebSockets are better suited for real-time needs.
+
+## Comparing Connection Methods
+
+| Method | Direction | Protocol | Latency | Reconnect | Best For |
+|---|---|---|---|---|---|
+| Short Polling | Client→Server | HTTP | High (polling interval) | Built-in | Rare updates, simplicity |
+| Long Polling | Both | HTTP | Low | Manual | Moderate frequency |
+| SSE | Server→Client | HTTP | Low | Automatic | Notifications, feeds |
+| WebSocket | Both | WS | Very low | Manual | Chat, games, collaborative |
+| gRPC Streaming | Both | HTTP/2 | Very low | Manual | Microservice streaming |
+
+## Choosing the Right Method
+
+```
+Need real-time data flowing server → client only?
+  → SSE (simplest, built-in reconnection, works through proxies)
+
+Need bidirectional communication (client sends too)?
+  → WebSocket
+
+Need to work in environments where WebSocket is blocked?
+  → Long polling fallback (Socket.IO does this automatically)
+
+Backend microservice streaming?
+  → gRPC streaming (bidirectional, efficient, typed)
+
+Low update frequency, simplicity is paramount?
+  → Short polling
+```
+
+**Socket.IO** is a library that wraps WebSockets with automatic fallback to long polling, reconnection logic, room management, and namespace support. It handles the complexity of WebSocket at scale. Consider it before implementing WebSockets from scratch.
+
+## Connection Limits and Load Balancing
+
+Both SSE and WebSocket connections are long-lived. Each one holds a file descriptor and memory on the server.
+
+- A typical server handles 10,000–100,000 concurrent connections
+- Load balancers must use **sticky sessions** (same client always routes to same server) OR the server must use a pub/sub backend (Redis) to broadcast across instances
+- Set timeouts to close idle connections and reclaim resources
+
+```nginx
+# nginx config for WebSocket proxying:
+location /ws {
+  proxy_pass http://backend;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_read_timeout 3600s;  # don't timeout WebSocket connections
+}
+```
+
+## Related Topics
+
+- [HTTP Fundamentals](/programming/apis/http-fundamentals) — HTTP/1.1 and HTTP/2 differences
+- [API Gateway](/programming/apis/api-gateway) — WebSocket proxying and load balancing
+- [Caching](/programming/apis/caching) — SSE and WebSocket responses should never be cached

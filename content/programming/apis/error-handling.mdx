@@ -1,0 +1,391 @@
+---
+title: Error Handling
+description: Consistent error responses, typed error classes, retry logic with exponential backoff, and the circuit breaker pattern.
+level: beginner
+area: programming
+topic: apis
+---
+
+Error handling is one of the most overlooked aspects of API design. A well-designed error system makes debugging fast, gives clients actionable information, and prevents cascading failures in distributed systems.
+
+## The Two Goals of API Errors
+
+1. **For humans** — error messages that tell a developer exactly what went wrong and how to fix it
+2. **For machines** — structured, predictable error codes that clients can handle programmatically
+
+An error that says `"Something went wrong"` satisfies neither goal. An error that says `"validation_error: field 'email' must be a valid email address"` satisfies both.
+
+## Standardized Error Response Format
+
+Every error response should have the same shape. Clients should never need to guess the structure.
+
+```json
+{
+  "error": {
+    "code": "validation_error",
+    "message": "Request validation failed",
+    "details": [
+      {
+        "field": "email",
+        "message": "Must be a valid email address",
+        "value": "not-an-email"
+      },
+      {
+        "field": "age",
+        "message": "Must be a positive integer",
+        "value": -5
+      }
+    ],
+    "request_id": "req_550e8400-e29b-41d4-a716-446655440000"
+  }
+}
+```
+
+**Fields:**
+- `code` — a machine-readable string identifier (snake_case, never changes between API versions)
+- `message` — human-readable description
+- `details` — optional array for validation errors
+- `request_id` — unique identifier to correlate with server logs
+
+The `request_id` is invaluable in production. When a customer says "I got an error at 3pm," you search your logs for that ID and find the exact failed request instantly.
+
+## Typed Error Classes
+
+Define error classes that map to HTTP status codes. This keeps error handling consistent across all routes.
+
+```ts
+// errors.ts
+
+export class AppError extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly message: string,
+    public readonly statusCode: number,
+    public readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = this.constructor.name;
+  }
+}
+
+export class ValidationError extends AppError {
+  constructor(details: Array<{ field: string; message: string }>) {
+    super("validation_error", "Request validation failed", 400, details);
+  }
+}
+
+export class NotFoundError extends AppError {
+  constructor(resource: string) {
+    super("not_found", `${resource} not found`, 404);
+  }
+}
+
+export class UnauthorizedError extends AppError {
+  constructor(message = "Authentication required") {
+    super("unauthorized", message, 401);
+  }
+}
+
+export class ForbiddenError extends AppError {
+  constructor(message = "Insufficient permissions") {
+    super("forbidden", message, 403);
+  }
+}
+
+export class ConflictError extends AppError {
+  constructor(message: string) {
+    super("conflict", message, 409);
+  }
+}
+
+export class TooManyRequestsError extends AppError {
+  constructor(retryAfter: number) {
+    super("rate_limit_exceeded", "Too many requests", 429);
+    this.retryAfter = retryAfter;
+  }
+  public retryAfter: number;
+}
+```
+
+Usage in services:
+```ts
+async function getUser(id: string): Promise<User> {
+  const user = await userRepo.findById(id);
+  if (!user) {
+    throw new NotFoundError("User"); // ← clear, typed, predictable
+  }
+  return user;
+}
+```
+
+## Central Error Handler
+
+One error handler for the entire application. It catches all thrown errors and formats them consistently.
+
+```ts
+// Express.js global error handler
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  const requestId = req.headers["x-request-id"] as string ?? generateId();
+
+  if (err instanceof AppError) {
+    // Known error — safe to expose details
+    return res.status(err.statusCode).json({
+      error: {
+        code: err.code,
+        message: err.message,
+        details: err.details,
+        request_id: requestId,
+      }
+    });
+  }
+
+  // Unknown error — log it, don't expose internals
+  console.error({ requestId, err });
+
+  res.status(500).json({
+    error: {
+      code: "internal_error",
+      message: "An unexpected error occurred",
+      request_id: requestId,
+    }
+  });
+});
+```
+
+**Why separate AppError from unknown errors?** Unknown errors might contain database connection strings, file paths, or internal implementation details. Exposing them is a security risk. Log them internally, return a generic message externally.
+
+## Never Leak Internal Details
+
+```json
+// Bad — exposes internal structure:
+{
+  "error": "ECONNREFUSED: Connection refused to 10.0.0.5:5432",
+  "stack": "Error: connect ECONNREFUSED...\n    at TCPConnectWrap.afterConnect..."
+}
+
+// Good — safe for external consumption:
+{
+  "error": {
+    "code": "internal_error",
+    "message": "An unexpected error occurred",
+    "request_id": "req_abc123"
+  }
+}
+```
+
+## Error Codes Over HTTP Status Codes
+
+HTTP status codes are coarse. There are many reasons a request can fail with a `400`. Use `code` to give precision:
+
+```
+400 Bad Request
+  └── validation_error          ← field validation failed
+  └── malformed_json            ← request body is not valid JSON
+  └── missing_required_field    ← required field not provided
+  └── invalid_enum_value        ← field value not in allowed list
+
+403 Forbidden
+  └── forbidden                 ← missing permission
+  └── insufficient_scope        ← OAuth scope too narrow
+  └── account_suspended         ← user account is suspended
+  └── plan_limit_reached        ← feature requires a higher plan
+```
+
+Clients can switch on `code` strings. HTTP status codes rarely change between API versions; `code` strings are your stable contract.
+
+## Retry Logic
+
+When a request fails with a transient error (network timeout, 503, 429), the client should retry. But retrying immediately often makes things worse — if the server is overloaded, hammering it with retries amplifies the problem.
+
+### Exponential Backoff
+
+Wait longer between each retry attempt:
+
+```ts
+async function fetchWithRetry<T>(
+  fn: () => Promise<T>,
+  maxAttempts = 3,
+  baseDelayMs = 200,
+): Promise<T> {
+  let lastError: Error;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err as Error;
+
+      // Don't retry client errors (4xx except 429)
+      if (err instanceof AppError && err.statusCode >= 400 && err.statusCode < 500 && err.statusCode !== 429) {
+        throw err;
+      }
+
+      if (attempt === maxAttempts) break;
+
+      // Exponential backoff with jitter:
+      // attempt 1: 200ms, attempt 2: 400ms, attempt 3: 800ms
+      // Jitter prevents all clients from retrying at the same moment
+      const delay = baseDelayMs * 2 ** (attempt - 1);
+      const jitter = Math.random() * delay * 0.1;
+      await sleep(delay + jitter);
+    }
+  }
+
+  throw lastError!;
+}
+```
+
+### Respecting Retry-After
+
+If the server returns a `429 Too Many Requests` with a `Retry-After` header, use that value:
+
+```ts
+if (response.status === 429) {
+  const retryAfter = parseInt(response.headers.get("retry-after") ?? "60");
+  await sleep(retryAfter * 1000);
+  return retry();
+}
+```
+
+### Which Errors to Retry
+
+| Status | Retry? | Reason |
+|---|---|---|
+| `408 Request Timeout` | Yes | Transient |
+| `429 Too Many Requests` | Yes, after delay | Rate limited |
+| `500 Internal Server Error` | Yes (with limit) | May be transient |
+| `502 Bad Gateway` | Yes | Upstream transient |
+| `503 Service Unavailable` | Yes | Server recovering |
+| `504 Gateway Timeout` | Yes | Upstream timeout |
+| `400 Bad Request` | No | Client error, won't succeed |
+| `401 Unauthorized` | No | Need to re-authenticate first |
+| `403 Forbidden` | No | Won't succeed without permission change |
+| `404 Not Found` | No | Resource doesn't exist |
+
+## Idempotency Keys
+
+For non-idempotent operations (POST), retries can cause duplicates. An **idempotency key** prevents this: the client generates a unique key per operation and sends it with the request. The server stores the result and returns the same response if the same key is used again.
+
+```http
+POST /orders
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+{ "product_id": "prod_789", "quantity": 2 }
+```
+
+Server-side:
+```ts
+async function createOrder(req) {
+  const idempotencyKey = req.headers["idempotency-key"];
+
+  if (idempotencyKey) {
+    const cached = await redis.get(`idempotency:${idempotencyKey}`);
+    if (cached) {
+      return JSON.parse(cached); // ← return the original response
+    }
+  }
+
+  const order = await orderService.create(req.body);
+
+  if (idempotencyKey) {
+    await redis.setex(`idempotency:${idempotencyKey}`, 86400, JSON.stringify(order));
+  }
+
+  return order;
+}
+```
+
+Stripe uses this pattern for payment APIs. If a payment request times out and the client retries, the second attempt returns the original payment result instead of charging twice.
+
+## Circuit Breaker Pattern
+
+When a downstream service is failing, continuing to send requests wastes resources, increases latency, and can cascade failures through your system. The **circuit breaker** detects failure and "opens" — stopping requests to the failing service for a period.
+
+```
+CLOSED (normal)  →  failures > threshold  →  OPEN (stop requests)
+OPEN             →  after timeout           →  HALF-OPEN (try one request)
+HALF-OPEN        →  success                →  CLOSED
+HALF-OPEN        →  failure                →  OPEN
+```
+
+```ts
+class CircuitBreaker {
+  private failures = 0;
+  private lastFailureTime = 0;
+  private state: "closed" | "open" | "half-open" = "closed";
+
+  constructor(
+    private failureThreshold = 5,
+    private timeout = 30000, // 30 seconds
+  ) {}
+
+  async call<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.state === "open") {
+      if (Date.now() - this.lastFailureTime > this.timeout) {
+        this.state = "half-open";
+      } else {
+        throw new Error("Circuit breaker is open — service unavailable");
+      }
+    }
+
+    try {
+      const result = await fn();
+      this.onSuccess();
+      return result;
+    } catch (err) {
+      this.onFailure();
+      throw err;
+    }
+  }
+
+  private onSuccess() {
+    this.failures = 0;
+    this.state = "closed";
+  }
+
+  private onFailure() {
+    this.failures++;
+    this.lastFailureTime = Date.now();
+    if (this.failures >= this.failureThreshold) {
+      this.state = "open";
+    }
+  }
+}
+
+// Usage:
+const paymentBreaker = new CircuitBreaker(5, 30000);
+
+async function processPayment(data) {
+  return paymentBreaker.call(() => stripeClient.charges.create(data));
+}
+```
+
+Libraries like `opossum` (Node.js) and `resilience4j` (Java) implement production-grade circuit breakers with metrics, events, and configuration.
+
+## Graceful Degradation
+
+When a non-critical service fails (e.g., recommendations, analytics), return a partial response rather than failing the entire request:
+
+```ts
+async function getProductPage(productId: string) {
+  const [product, recommendations] = await Promise.allSettled([
+    productService.get(productId),          // critical
+    recommendationService.get(productId),    // non-critical
+  ]);
+
+  if (product.status === "rejected") throw product.reason; // fail fast
+
+  return {
+    product: product.value,
+    recommendations: recommendations.status === "fulfilled"
+      ? recommendations.value
+      : [], // ← degrade gracefully
+  };
+}
+```
+
+## Related Topics
+
+- [HTTP Fundamentals](/programming/apis/http-fundamentals) — status codes for errors
+- [Design Patterns](/programming/apis/design-patterns) — where error handling fits in the service layer
+- [Testing](/programming/apis/testing) — testing error paths and edge cases
+- [API Gateway](/programming/apis/api-gateway) — circuit breaking and retry at the infrastructure level

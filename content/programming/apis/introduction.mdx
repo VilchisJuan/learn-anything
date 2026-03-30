@@ -1,0 +1,154 @@
+---
+title: Introduction to APIs
+description: What an API is, why they exist, and the four major styles every developer will encounter — REST, GraphQL, gRPC, and WebSocket.
+level: beginner
+area: programming
+topic: apis
+---
+
+An **API** (Application Programming Interface) is a contract between two pieces of software. It defines what requests can be made, how to make them, and what the responses will look like. The software on the other side does not need to share its code — only its API.
+
+Think of a restaurant menu. You do not go into the kitchen and cook your own food. You look at the menu (the API), place an order (a request), and receive a meal (a response). The kitchen's internal logic — how the food is prepared — is completely hidden.
+
+## Why APIs Exist
+
+Without APIs, every application would need to implement every feature itself. APIs allow:
+
+- **Separation of concerns** — frontend talks to a backend; backend talks to a database or external services
+- **Reusability** — a payment API (Stripe), a maps API (Google Maps), or an auth API (Auth0) can be consumed by thousands of applications
+- **Platform independence** — a mobile app, a web app, and a CLI can all talk to the same backend API
+- **Team independence** — the team building the iOS app does not need to know how the server works, only what API it exposes
+
+## The Four Major API Styles
+
+### REST (Representational State Transfer)
+
+The dominant style for web APIs. REST is built on HTTP and treats everything as a **resource** accessible at a URL.
+
+```
+GET  /users/42          → retrieve user 42
+POST /users             → create a new user
+PUT  /users/42          → replace user 42
+DELETE /users/42        → delete user 42
+```
+
+REST is **stateless** — each request carries all the information the server needs. Nothing about the previous request is remembered.
+
+**Use when:** building web or mobile app backends, public APIs, CRUD-heavy services.
+
+### GraphQL
+
+A query language for APIs developed by Meta. Instead of multiple endpoints, there is **one endpoint** and the client specifies exactly what data it needs.
+
+```graphql
+query {
+  user(id: "42") {
+    name
+    email
+    posts {
+      title
+      createdAt
+    }
+  }
+}
+```
+
+The server returns exactly that shape — no more, no less. This eliminates **over-fetching** (getting data you don't need) and **under-fetching** (needing multiple requests to get all the data).
+
+**Use when:** complex frontends with many different data requirements, mobile apps where bandwidth matters, teams with separate frontend and backend.
+
+### gRPC (Google Remote Procedure Call)
+
+A framework for calling functions on a remote server as if they were local functions. Uses **Protocol Buffers** (protobuf) — a binary format — instead of JSON, making it much faster.
+
+```proto
+service UserService {
+  rpc GetUser (GetUserRequest) returns (User);
+  rpc CreateUser (CreateUserRequest) returns (User);
+}
+```
+
+Both the client and server generate code from the same `.proto` schema, ensuring type safety across languages.
+
+**Use when:** microservice-to-microservice communication, performance-critical internal services, polyglot environments (Go backend talking to a Python service).
+
+### WebSocket
+
+A persistent, bidirectional connection between client and server. Unlike HTTP (where the client always initiates), either side can send messages at any time.
+
+```
+Client → Server: subscribe to trade updates
+Server → Client: { price: 182.45, symbol: "AAPL" }  ← pushed in real time
+Server → Client: { price: 182.60, symbol: "AAPL" }
+```
+
+**Use when:** live feeds (stock tickers, sports scores), chat applications, collaborative editing, multiplayer games.
+
+## Choosing the Right Style
+
+| Scenario | Best Choice |
+|---|---|
+| CRUD web app backend | REST |
+| Complex frontend data requirements | GraphQL |
+| Internal microservices | gRPC |
+| Real-time features | WebSocket |
+| Public API for third parties | REST |
+
+In practice, most production systems use a combination: REST for the public API, gRPC for internal service-to-service calls, and WebSocket for live features.
+
+## The Client-Server Model
+
+Every API interaction follows the same basic model:
+
+```
+Client                    Server
+  │                         │
+  │── HTTP Request ────────▶│
+  │   GET /users/42         │
+  │   Headers: ...          │  ← processes request
+  │                         │  ← queries database
+  │◀─ HTTP Response ────────│
+  │   200 OK                │
+  │   { "id": 42, ... }     │
+  │                         │
+```
+
+The **client** initiates. The **server** responds. The connection is typically stateless (each request is independent). This model scales well because servers don't need to remember anything between requests.
+
+## Synchronous vs Asynchronous APIs
+
+**Synchronous:** the client waits for the response before continuing. Most REST and GraphQL APIs work this way.
+
+```js
+const user = await fetch("/users/42").then(r => r.json());
+// execution pauses here until the response arrives
+console.log(user.name);
+```
+
+**Asynchronous / event-driven:** the client sends a request and continues working. The result arrives later via a callback, webhook, or message queue. Common in long-running operations (video processing, report generation).
+
+```
+POST /exports          → 202 Accepted, job_id: "abc123"
+GET  /exports/abc123   → 200 { status: "processing" }
+GET  /exports/abc123   → 200 { status: "done", url: "..." }
+```
+
+## What You Will Learn in This Course
+
+This course covers every concept a junior developer needs to go from "I can hit an endpoint" to "I can design and build a production-grade API":
+
+1. [HTTP Fundamentals](/programming/apis/http-fundamentals) — the protocol that powers most APIs
+2. [REST Design](/programming/apis/rest-design) — how to design clean, predictable endpoints
+3. [Authentication](/programming/apis/authentication) — proving who you are (API keys, JWT, OAuth2)
+4. [Authorization](/programming/apis/authorization) — controlling what you can do (RBAC, scopes)
+5. [Security](/programming/apis/security) — CORS, rate limiting, injection, OWASP Top 10
+6. [Design Patterns](/programming/apis/design-patterns) — Singleton, Repository, Service layer, DI
+7. [Multi-Tenancy](/programming/apis/multi-tenancy) — serving multiple customers from one system
+8. [Error Handling](/programming/apis/error-handling) — consistent errors, retry logic, circuit breakers
+9. [Caching](/programming/apis/caching) — making APIs fast with HTTP caching and Redis
+10. [Connection Methods](/programming/apis/connection-methods) — WebSockets, SSE, long polling, HTTP/2
+11. [Middleware](/programming/apis/middleware) — request pipelines, logging, validation
+12. [API Gateway](/programming/apis/api-gateway) — routing, load balancing, the gateway pattern
+13. [Versioning](/programming/apis/versioning) — evolving an API without breaking clients
+14. [Documentation](/programming/apis/documentation) — OpenAPI/Swagger and writing great API docs
+15. [Testing](/programming/apis/testing) — unit, integration, and contract testing

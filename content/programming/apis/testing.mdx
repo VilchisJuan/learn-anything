@@ -1,0 +1,497 @@
+---
+title: Testing APIs
+description: The three levels of API testing — unit tests for business logic, integration tests for real endpoints, and contract tests for service compatibility.
+level: intermediate
+area: programming
+topic: apis
+---
+
+Testing is the difference between a fragile API that breaks on every deploy and a confident one that you can change and release without fear. Most developers understand testing in theory but struggle to apply it to APIs. This lesson covers the three levels of API testing with practical, runnable examples.
+
+## The Testing Pyramid
+
+```
+         ╱▲╲
+        ╱ E2E╲         ← Few, slow, expensive
+       ╱───────╲
+      ╱Integration╲    ← Some, moderate speed
+     ╱─────────────╲
+    ╱   Unit Tests   ╲  ← Many, fast, cheap
+   ╱─────────────────╲
+```
+
+Each level tests at a different granularity. The goal is many fast unit tests, fewer integration tests, and just enough end-to-end tests to cover critical user flows.
+
+## Unit Testing
+
+Unit tests test individual functions in isolation. No network, no database, no file system — external dependencies are replaced with **mocks** or **fakes**.
+
+### Testing a Service
+
+```ts
+// user.service.test.ts
+import { describe, it, expect, beforeEach } from "vitest";
+import { UserService } from "./user.service";
+import { InMemoryUserRepository } from "../test/fakes";
+import { FakeEmailService } from "../test/fakes";
+import { ConflictError } from "../errors";
+
+describe("UserService", () => {
+  let userService: UserService;
+  let userRepo: InMemoryUserRepository;
+  let emailService: FakeEmailService;
+
+  beforeEach(() => {
+    userRepo = new InMemoryUserRepository();
+    emailService = new FakeEmailService();
+    userService = new UserService(userRepo, emailService);
+  });
+
+  describe("registerUser", () => {
+    it("creates a user with hashed password", async () => {
+      const user = await userService.registerUser({
+        name: "Alice",
+        email: "alice@example.com",
+        password: "password123",
+      });
+
+      expect(user.name).toBe("Alice");
+      expect(user.email).toBe("alice@example.com");
+      expect(user.password_hash).not.toBe("password123"); // should be hashed
+      expect(user.role).toBe("viewer"); // default role
+    });
+
+    it("sends a welcome email after registration", async () => {
+      await userService.registerUser({
+        name: "Alice",
+        email: "alice@example.com",
+        password: "password123",
+      });
+
+      expect(emailService.sentEmails).toHaveLength(1);
+      expect(emailService.sentEmails[0]).toMatchObject({
+        to: "alice@example.com",
+        subject: expect.stringContaining("Welcome"),
+      });
+    });
+
+    it("throws ConflictError if email already exists", async () => {
+      await userService.registerUser({
+        name: "Alice",
+        email: "alice@example.com",
+        password: "pass1",
+      });
+
+      await expect(
+        userService.registerUser({
+          name: "Alice 2",
+          email: "alice@example.com", // same email
+          password: "pass2",
+        })
+      ).rejects.toThrow(ConflictError);
+    });
+  });
+});
+```
+
+### Fakes vs Mocks
+
+**Fakes** are lightweight in-memory implementations of a dependency. They are more reliable than mocks because they actually run logic:
+
+```ts
+// In-memory fake — implements the real interface:
+export class InMemoryUserRepository implements UserRepository {
+  private users: User[] = [];
+
+  async findById(id: string) {
+    return this.users.find(u => u.id === id) ?? null;
+  }
+
+  async findByEmail(email: string) {
+    return this.users.find(u => u.email === email) ?? null;
+  }
+
+  async create(data: CreateUserData) {
+    const user = { id: `usr_${this.users.length + 1}`, ...data };
+    this.users.push(user);
+    return user;
+  }
+
+  // Test helpers:
+  seed(users: User[]) { this.users = users; }
+  getAll() { return this.users; }
+}
+```
+
+**Mocks** (using `vi.fn()` or `jest.fn()`) record calls but don't run real logic. They are useful when you only care that a function was called:
+
+```ts
+const mockRepo = {
+  findByEmail: vi.fn().mockResolvedValue(null),
+  create: vi.fn().mockResolvedValue({ id: "usr_1", name: "Alice" }),
+};
+
+// Later: verify the mock was called correctly
+expect(mockRepo.create).toHaveBeenCalledWith(
+  expect.objectContaining({ email: "alice@example.com" })
+);
+```
+
+Prefer fakes for core logic tests. Use mocks for simple pass/fail scenarios.
+
+## Integration Testing
+
+Integration tests hit your actual route handlers through HTTP — with a real database. They test that all pieces work together.
+
+```ts
+// users.integration.test.ts
+import request from "supertest";
+import { app } from "../app";
+import { db } from "../db";
+
+describe("POST /v1/users", () => {
+  beforeEach(async () => {
+    await db.query("TRUNCATE users CASCADE");
+  });
+
+  afterAll(async () => {
+    await db.end();
+  });
+
+  it("creates a user and returns 201", async () => {
+    const response = await request(app)
+      .post("/v1/users")
+      .set("Authorization", `Bearer ${getAdminToken()}`)
+      .send({
+        name: "Alice Johnson",
+        email: "alice@example.com",
+        role: "editor",
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      name: "Alice Johnson",
+      email: "alice@example.com",
+      role: "editor",
+    });
+    expect(response.body.id).toBeDefined();
+    expect(response.body.password_hash).toBeUndefined(); // never in response
+  });
+
+  it("returns 400 for invalid email", async () => {
+    const response = await request(app)
+      .post("/v1/users")
+      .set("Authorization", `Bearer ${getAdminToken()}`)
+      .send({ name: "Alice", email: "not-an-email", role: "editor" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("validation_error");
+    expect(response.body.error.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: "email" })
+      ])
+    );
+  });
+
+  it("returns 409 for duplicate email", async () => {
+    await request(app)
+      .post("/v1/users")
+      .set("Authorization", `Bearer ${getAdminToken()}`)
+      .send({ name: "Alice", email: "alice@example.com", role: "editor" });
+
+    const response = await request(app)
+      .post("/v1/users")
+      .set("Authorization", `Bearer ${getAdminToken()}`)
+      .send({ name: "Alice 2", email: "alice@example.com", role: "viewer" });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe("conflict");
+  });
+
+  it("returns 401 without auth token", async () => {
+    const response = await request(app)
+      .post("/v1/users")
+      .send({ name: "Alice", email: "alice@example.com", role: "editor" });
+
+    expect(response.status).toBe(401);
+  });
+
+  it("returns 403 for non-admin users", async () => {
+    const response = await request(app)
+      .post("/v1/users")
+      .set("Authorization", `Bearer ${getEditorToken()}`) // not admin
+      .send({ name: "Alice", email: "alice@example.com", role: "editor" });
+
+    expect(response.status).toBe(403);
+  });
+});
+```
+
+### Test Database Setup
+
+Use a separate test database or transaction rollback to keep tests isolated:
+
+```ts
+// Option 1: Separate test database
+process.env.DATABASE_URL = "postgresql://localhost/myapp_test";
+
+// Option 2: Transaction rollback (faster — no truncation needed)
+let transactionClient;
+
+beforeEach(async () => {
+  transactionClient = await db.connect();
+  await transactionClient.query("BEGIN");
+});
+
+afterEach(async () => {
+  await transactionClient.query("ROLLBACK"); // undo all changes
+  transactionClient.release();
+});
+```
+
+Transaction rollback is fastest because it undoes all changes at the DB level without truncating tables.
+
+### Testing Authentication
+
+Generate real tokens for tests:
+
+```ts
+import jwt from "jsonwebtoken";
+
+export function getAdminToken(userId = "usr_test_admin"): string {
+  return jwt.sign(
+    { sub: userId, role: "admin", tenant_id: "test-tenant" },
+    process.env.JWT_SECRET!,
+    { expiresIn: "1h" }
+  );
+}
+
+export function getEditorToken(userId = "usr_test_editor"): string {
+  return jwt.sign(
+    { sub: userId, role: "editor", tenant_id: "test-tenant" },
+    process.env.JWT_SECRET!,
+    { expiresIn: "1h" }
+  );
+}
+```
+
+## What to Test in Integration Tests
+
+Every endpoint should have tests for:
+
+| Scenario | Test |
+|---|---|
+| Happy path | Returns correct data and status code |
+| Invalid input | Returns 400 with validation error details |
+| Missing auth | Returns 401 |
+| Wrong role | Returns 403 |
+| Not found | Returns 404 |
+| Duplicate/conflict | Returns 409 |
+| Pagination | Returns correct page and metadata |
+| Filters | Correct data is filtered |
+
+Test the **contract** of the response, not its exact implementation:
+
+```ts
+// Too brittle — breaks if order changes:
+expect(response.body).toEqual({
+  id: "usr_42",
+  name: "Alice",
+  email: "alice@example.com",
+  role: "admin",
+  created_at: "2024-01-15T10:30:00.000Z",
+});
+
+// Better — verify the shape:
+expect(response.body).toMatchObject({
+  name: "Alice",
+  email: "alice@example.com",
+  role: "admin",
+});
+expect(response.body.id).toMatch(/^usr_/);
+expect(response.body.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+```
+
+## Contract Testing
+
+In microservices, Service A calls Service B. If Service B changes its API, Service A breaks — but you might not catch this until production.
+
+**Contract testing** verifies that the consumer's expectations and the provider's capabilities are compatible.
+
+**Pact** is the standard library. The consumer defines a **pact** (a list of expected interactions), and the provider verifies it can fulfill them:
+
+```ts
+// Consumer test (orders-service expecting users-service):
+const pact = new Pact({
+  consumer: "orders-service",
+  provider: "users-service",
+});
+
+describe("users-service", () => {
+  it("returns a user by ID", async () => {
+    await pact.addInteraction({
+      state: "user usr_42 exists",
+      uponReceiving: "a request for user usr_42",
+      withRequest: {
+        method: "GET",
+        path: "/users/usr_42",
+        headers: { Authorization: like("Bearer token") },
+      },
+      willRespondWith: {
+        status: 200,
+        body: {
+          id: like("usr_42"),
+          name: like("Alice"),
+          email: like("alice@example.com"),
+          role: like("admin"),
+        },
+      },
+    });
+
+    const user = await usersClient.getUser("usr_42");
+    expect(user.id).toBeDefined();
+  });
+});
+```
+
+The pact is published to a Pact Broker. The provider (users-service) runs the pact against its real implementation:
+
+```ts
+// Provider verification (users-service):
+const verifier = new Verifier({
+  provider: "users-service",
+  pactBrokerUrl: "https://pact-broker.example.com",
+  providerBaseUrl: "http://localhost:3001",
+  stateHandlers: {
+    "user usr_42 exists": async () => {
+      await db.users.create({ id: "usr_42", name: "Alice", ... });
+    },
+  },
+});
+
+await verifier.verifyProvider();
+```
+
+If the provider changes the user object in a way that breaks consumers, the pact verification fails before deployment.
+
+## Testing Rate Limits
+
+```ts
+it("returns 429 after exceeding rate limit", async () => {
+  const requests = Array.from({ length: 101 }).map(() =>
+    request(app)
+      .get("/v1/products")
+      .set("Authorization", `Bearer ${getToken()}`)
+  );
+
+  const responses = await Promise.all(requests);
+  const tooManyRequests = responses.filter(r => r.status === 429);
+  expect(tooManyRequests.length).toBeGreaterThan(0);
+  expect(tooManyRequests[0].body.error.code).toBe("rate_limit_exceeded");
+  expect(tooManyRequests[0].headers["retry-after"]).toBeDefined();
+});
+```
+
+## Testing Error Scenarios
+
+Don't skip error path testing. Many bugs hide in error handling:
+
+```ts
+it("returns 500 with a safe error message when DB is down", async () => {
+  // Simulate DB failure:
+  vi.spyOn(db, "query").mockRejectedValue(new Error("ECONNREFUSED"));
+
+  const response = await request(app)
+    .get("/v1/users/usr_42")
+    .set("Authorization", `Bearer ${getAdminToken()}`);
+
+  expect(response.status).toBe(500);
+  expect(response.body.error.code).toBe("internal_error");
+  // Should NOT contain the DB error message:
+  expect(JSON.stringify(response.body)).not.toContain("ECONNREFUSED");
+  // Should include a request ID for tracing:
+  expect(response.body.error.request_id).toBeDefined();
+});
+```
+
+## Snapshot Testing for Responses
+
+For stable responses (like user or product objects), snapshot tests catch unexpected changes:
+
+```ts
+it("user response shape has not changed", async () => {
+  const response = await request(app)
+    .get("/v1/users/usr_42")
+    .set("Authorization", `Bearer ${getAdminToken()}`);
+
+  // First run creates the snapshot. Future runs compare against it.
+  expect({
+    status: response.status,
+    fields: Object.keys(response.body).sort(),
+  }).toMatchSnapshot();
+});
+```
+
+If someone accidentally adds `password_hash` to the response, the snapshot fails.
+
+## Testing Multi-Tenancy Isolation
+
+Critical: verify tenant data is isolated:
+
+```ts
+it("cannot access another tenant's data", async () => {
+  const tenant1User = await createTestUser({ tenant_id: "tenant-1" });
+  const tenant2Token = getTokenForTenant("tenant-2");
+
+  const response = await request(app)
+    .get(`/v1/users/${tenant1User.id}`)
+    .set("Authorization", `Bearer ${tenant2Token}`);
+
+  // Should return 404 (not 403 — don't reveal the resource exists)
+  expect(response.status).toBe(404);
+});
+```
+
+## CI/CD Integration
+
+Run tests on every commit:
+
+```yaml
+# GitHub Actions:
+name: Test
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: myapp_test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+      - run: npm run db:migrate:test
+      - run: npm test
+        env:
+          DATABASE_URL: postgresql://postgres:test@localhost:5432/myapp_test
+          REDIS_URL: redis://localhost:6379
+```
+
+## Related Topics
+
+- [Design Patterns](/programming/apis/design-patterns) — DI and Repository make testing possible
+- [Error Handling](/programming/apis/error-handling) — test every error code path
+- [Authentication](/programming/apis/authentication) — generating test tokens
+- [Multi-Tenancy](/programming/apis/multi-tenancy) — isolation tests are non-negotiable

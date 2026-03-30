@@ -1,0 +1,412 @@
+---
+title: Middleware
+description: The request pipeline — how middleware chains work, logging, authentication, validation, and error handling middleware with real implementation patterns.
+level: intermediate
+area: programming
+topic: apis
+---
+
+**Middleware** is code that runs between receiving a request and sending a response. Every production API is built from a chain of middleware functions, each doing one focused job: logging, parsing, authentication, rate limiting, validation.
+
+Understanding the middleware pattern is fundamental because it appears in every framework — Express, Fastify, Koa, Django, Rails, ASP.NET, Laravel.
+
+## The Middleware Pipeline
+
+Think of middleware as a series of checkpoints that every request passes through:
+
+```
+Request
+   │
+   ▼
+┌──────────────────┐
+│  Request Logger  │  logs: method, url, timestamp
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Body Parser     │  parses JSON body into req.body
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  CORS            │  adds Access-Control headers
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Rate Limiter    │  counts requests per IP/user
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Authentication  │  verifies JWT, sets req.user
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Route Handler   │  your business logic
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Error Handler   │  catches any thrown errors
+└────────┬─────────┘
+         │
+         ▼
+     Response
+```
+
+Each middleware has the opportunity to:
+1. Inspect or modify the request
+2. Inspect or modify the response
+3. Call `next()` to pass control to the next middleware
+4. End the chain by sending a response (short-circuit)
+
+## The Middleware Function Signature
+
+```ts
+// Express.js pattern (most common):
+type Middleware = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => void | Promise<void>;
+
+// Koa.js pattern (async/await-native):
+type Middleware = (ctx: Context, next: () => Promise<void>) => Promise<void>;
+```
+
+## Request Logger Middleware
+
+Every API needs to log incoming requests and outgoing responses. This should be the first middleware.
+
+```ts
+function requestLogger(req: Request, res: Response, next: NextFunction) {
+  const start = Date.now();
+  const requestId = randomUUID();
+
+  // Attach to request for downstream use:
+  req.requestId = requestId;
+
+  // Log when response finishes:
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    console.log({
+      requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration_ms: duration,
+      user_id: req.user?.id,
+      ip: req.ip,
+    });
+  });
+
+  next();
+}
+
+app.use(requestLogger);
+```
+
+Use structured logging (JSON objects, not strings). Structured logs are queryable — in production, you'll search for `status: 500` or `duration_ms > 1000`, not grep through log lines.
+
+## Body Parser Middleware
+
+Parses the raw request body into a usable object.
+
+```ts
+import express from "express";
+
+// Parse JSON bodies (application/json):
+app.use(express.json({ limit: "10kb" })); // size limit prevents DoS
+
+// Parse URL-encoded bodies (HTML form submissions):
+app.use(express.urlencoded({ extended: true, limit: "10kb" }));
+```
+
+Without this, `req.body` is `undefined`.
+
+## CORS Middleware
+
+```ts
+import cors from "cors";
+
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, callback) => {
+    const allowedOrigins = [
+      "https://app.example.com",
+      "https://staging.example.com",
+      ...(process.env.NODE_ENV === "development" ? ["http://localhost:3000"] : []),
+    ];
+
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS blocked: ${origin}`));
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Authorization", "Content-Type", "X-Request-ID"],
+};
+
+app.use(cors(corsOptions));
+```
+
+## Authentication Middleware
+
+Extracts and validates the JWT. Attaches the user to `req.user` for downstream handlers.
+
+```ts
+import jwt from "jsonwebtoken";
+
+async function authenticate(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({
+      error: { code: "unauthorized", message: "Authentication required" }
+    });
+  }
+
+  const token = authHeader.slice(7); // remove "Bearer "
+
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+    req.user = {
+      id: payload.sub,
+      role: payload.role,
+      tenant_id: payload.tenant_id,
+    };
+    next();
+  } catch (err) {
+    if (err instanceof jwt.TokenExpiredError) {
+      return res.status(401).json({
+        error: { code: "token_expired", message: "Token has expired" }
+      });
+    }
+    return res.status(401).json({
+      error: { code: "invalid_token", message: "Invalid token" }
+    });
+  }
+}
+
+// Apply globally:
+app.use(authenticate);
+
+// Or per-route (some routes are public):
+router.get("/products", getProductsHandler);                  // public
+router.post("/orders", authenticate, createOrderHandler);     // protected
+```
+
+## Optional Authentication Middleware
+
+Some routes show more data to authenticated users but are also accessible publicly:
+
+```ts
+function optionalAuthenticate(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    req.user = null; // unauthenticated
+    return next();
+  }
+
+  // Try to authenticate but don't fail if token is missing:
+  authenticate(req, res, next);
+}
+
+router.get("/products/:id", optionalAuthenticate, getProductHandler);
+// Handler can check req.user: if null, show public data; if set, show personalized data
+```
+
+## Validation Middleware
+
+Validates request data before it reaches the handler. The handler receives clean, typed data.
+
+```ts
+import { z } from "zod";
+
+function validate(schema: { body?: z.ZodSchema; query?: z.ZodSchema; params?: z.ZodSchema }) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (schema.body) req.body = schema.body.parse(req.body);
+      if (schema.query) req.query = schema.query.parse(req.query) as any;
+      if (schema.params) req.params = schema.params.parse(req.params) as any;
+      next();
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          error: {
+            code: "validation_error",
+            message: "Request validation failed",
+            details: err.errors.map(e => ({
+              field: e.path.join("."),
+              message: e.message,
+            })),
+          }
+        });
+      }
+      next(err);
+    }
+  };
+}
+
+// Usage:
+const CreateUserSchema = {
+  body: z.object({
+    name: z.string().min(1).max(100),
+    email: z.string().email(),
+    role: z.enum(["admin", "editor", "viewer"]),
+  }),
+};
+
+router.post("/users",
+  authenticate,
+  validate(CreateUserSchema),
+  createUserHandler,
+);
+```
+
+The handler is now simple — it trusts that `req.body` matches the schema.
+
+## Rate Limiting Middleware
+
+```ts
+import { RateLimiterRedis } from "rate-limiter-flexible";
+
+const rateLimiter = new RateLimiterRedis({
+  storeClient: redis,
+  points: 100,        // 100 requests
+  duration: 60,       // per 60 seconds
+  keyPrefix: "rl_",
+});
+
+async function rateLimit(req: Request, res: Response, next: NextFunction) {
+  try {
+    const key = req.user?.id ?? req.ip; // per-user if authenticated, per-IP otherwise
+    const result = await rateLimiter.consume(key);
+
+    res.setHeader("X-RateLimit-Limit", 100);
+    res.setHeader("X-RateLimit-Remaining", result.remainingPoints);
+    res.setHeader("X-RateLimit-Reset", new Date(Date.now() + result.msBeforeNext).toISOString());
+
+    next();
+  } catch (rejRes: any) {
+    res.setHeader("Retry-After", Math.ceil(rejRes.msBeforeNext / 1000));
+    res.status(429).json({
+      error: { code: "rate_limit_exceeded", message: "Too many requests" }
+    });
+  }
+}
+```
+
+## Error Handler Middleware
+
+In Express, the error handler has four parameters. It catches any error thrown in handlers or passed via `next(err)`:
+
+```ts
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  // Known operational errors:
+  if (err instanceof AppError) {
+    return res.status(err.statusCode).json({
+      error: {
+        code: err.code,
+        message: err.message,
+        details: err.details,
+        request_id: req.requestId,
+      }
+    });
+  }
+
+  // Unexpected errors — log but don't expose:
+  console.error({ requestId: req.requestId, err });
+  res.status(500).json({
+    error: {
+      code: "internal_error",
+      message: "An unexpected error occurred",
+      request_id: req.requestId,
+    }
+  });
+});
+```
+
+The error handler must be registered **after** all routes. It only runs when an error is thrown or `next(err)` is called.
+
+## Middleware Order Matters
+
+Middleware runs in the order it is registered. A common mistake is placing authentication after a route that should be protected.
+
+```ts
+// Wrong order:
+app.get("/admin", adminHandler);      // runs before authentication!
+app.use(authenticate);                // too late
+
+// Correct order:
+app.use(requestLogger);               // 1. log everything
+app.use(express.json());              // 2. parse bodies
+app.use(cors(corsOptions));           // 3. add CORS headers
+app.use(rateLimit);                   // 4. rate limit
+app.use(authenticate);                // 5. verify identity
+app.get("/admin", adminHandler);      // 6. protected route
+app.use(errorHandler);                // 7. last — catch errors
+```
+
+## Async Error Handling
+
+Express does not catch errors thrown in async functions by default. Wrap them or use a helper:
+
+```ts
+// Manual wrapping:
+router.get("/users/:id", async (req, res, next) => {
+  try {
+    const user = await userService.get(req.params.id);
+    res.json(user);
+  } catch (err) {
+    next(err); // ← must call next(err) in Express
+  }
+});
+
+// Helper wrapper (cleaner):
+const asyncHandler = (fn: RequestHandler) =>
+  (req: Request, res: Response, next: NextFunction) =>
+    Promise.resolve(fn(req, res, next)).catch(next);
+
+router.get("/users/:id", asyncHandler(async (req, res) => {
+  const user = await userService.get(req.params.id);
+  res.json(user);
+}));
+```
+
+Express 5 (currently in beta) handles async errors automatically without wrapping.
+
+## Tenant Middleware
+
+In [multi-tenant](/programming/apis/multi-tenancy) systems, a middleware resolves the tenant and attaches it to the request:
+
+```ts
+async function resolveTenant(req: Request, res: Response, next: NextFunction) {
+  if (!req.user) return next(); // unauthenticated
+
+  const tenant = await tenantRepo.findById(req.user.tenant_id);
+  if (!tenant || !tenant.active) {
+    return res.status(403).json({
+      error: { code: "tenant_inactive", message: "Account is inactive" }
+    });
+  }
+
+  req.tenant = tenant;
+  next();
+}
+
+// Chain: authenticate → resolveTenant → handler
+app.use(authenticate);
+app.use(resolveTenant);
+```
+
+## Related Topics
+
+- [Design Patterns](/programming/apis/design-patterns) — the service layer behind handlers
+- [Authentication](/programming/apis/authentication) — JWT validation in middleware
+- [Security](/programming/apis/security) — security headers and CORS details
+- [Error Handling](/programming/apis/error-handling) — the error types used in the error handler

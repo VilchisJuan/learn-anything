@@ -1,0 +1,357 @@
+---
+title: Caching
+description: Making APIs fast — HTTP cache headers, ETags, server-side caching with Redis, cache invalidation strategies, and what never to cache.
+level: intermediate
+area: programming
+topic: apis
+---
+
+Caching is one of the highest-leverage performance optimizations available. A cached response costs microseconds to serve; an uncached one may cost hundreds of milliseconds and database queries. Understanding caching layers and when to use each one separates fast APIs from slow ones.
+
+## The Caching Layers
+
+Requests pass through multiple potential caches before reaching your server:
+
+```
+Client         CDN/Edge       Reverse Proxy    App Server    Database
+  │               │                │               │            │
+  │──── GET ─────▶│                │               │            │
+  │               │ (cache hit)    │               │            │
+  │◀── 200 ───────│                │               │            │
+  │               │                │               │            │
+  │──── GET ──────────────────────▶│               │            │
+  │               │                │ (cache hit)   │            │
+  │◀── 200 ────────────────────────│               │            │
+  │               │                │               │            │
+  │──── GET ────────────────────────────────────▶  │            │
+  │               │                │            query ─────────▶│
+  │               │                │            result◀─────────│
+  │               │                │            cache ───▶Redis  │
+  │◀── 200 ────────────────────────────────────────│            │
+```
+
+Each layer serves a different purpose:
+- **Client cache** — browser or mobile app caches responses locally
+- **CDN/Edge cache** — geographically distributed (Cloudflare, AWS CloudFront)
+- **Reverse proxy cache** — nginx, Varnish, or your API gateway
+- **Application cache** — in-memory (Node process), Redis, Memcached
+- **Database cache** — query result cache, buffer pool
+
+## HTTP Cache Headers
+
+HTTP has a built-in caching protocol. Understanding the headers lets you control every layer.
+
+### Cache-Control
+
+The primary header. Directives:
+
+```http
+# Cache for 1 hour:
+Cache-Control: max-age=3600
+
+# Public (can be cached by CDNs) vs private (user-specific, browser-only):
+Cache-Control: public, max-age=86400       ← cacheable by CDN
+Cache-Control: private, max-age=3600      ← browser only (e.g., user profile)
+
+# Don't cache at all:
+Cache-Control: no-store
+
+# Cache but must revalidate before serving:
+Cache-Control: no-cache
+
+# Cached copy is stale, must revalidate before serving:
+Cache-Control: must-revalidate
+
+# Serve stale while revalidating in the background (great UX):
+Cache-Control: stale-while-revalidate=60
+```
+
+**`no-cache` vs `no-store`:** `no-cache` stores the response but requires revalidation with the server before serving it. `no-store` never stores it. Most cases where you "don't want caching" should use `no-store`.
+
+### What to Cache
+
+| Resource | Strategy |
+|---|---|
+| Static files (JS, CSS, images) | `public, max-age=31536000, immutable` (1 year) |
+| API responses (public data) | `public, max-age=300` (5 min) |
+| API responses (user data) | `private, max-age=60` |
+| Sensitive data (auth, payment) | `no-store` |
+| Real-time data (stock prices) | `no-store` or `max-age=1` |
+
+### ETag (Entity Tag)
+
+An ETag is a version identifier for a resource. The client stores it and sends it back on the next request. If the resource hasn't changed, the server returns `304 Not Modified` — saving bandwidth.
+
+```http
+# First request:
+GET /products/42 HTTP/1.1
+
+HTTP/1.1 200 OK
+ETag: "abc123"
+Cache-Control: max-age=60
+{ ...product data... }
+
+# Second request (after 60s — cache expired):
+GET /products/42 HTTP/1.1
+If-None-Match: "abc123"
+
+# If not changed:
+HTTP/1.1 304 Not Modified    ← no body, saves bandwidth
+
+# If changed:
+HTTP/1.1 200 OK
+ETag: "xyz789"
+{ ...updated product data... }
+```
+
+Generating ETags:
+```ts
+import crypto from "crypto";
+
+function generateETag(data: unknown): string {
+  const hash = crypto
+    .createHash("md5")
+    .update(JSON.stringify(data))
+    .digest("hex");
+  return `"${hash}"`;
+}
+
+app.get("/products/:id", async (req, res) => {
+  const product = await productService.get(req.params.id);
+  const etag = generateETag(product);
+
+  if (req.headers["if-none-match"] === etag) {
+    return res.status(304).end(); // Not Modified
+  }
+
+  res.setHeader("ETag", etag);
+  res.setHeader("Cache-Control", "max-age=60");
+  res.json(product);
+});
+```
+
+### Last-Modified
+
+Alternative to ETags using a timestamp:
+
+```http
+# Response:
+Last-Modified: Mon, 15 Jan 2024 10:30:00 GMT
+
+# Next request:
+If-Modified-Since: Mon, 15 Jan 2024 10:30:00 GMT
+
+# No change → 304 Not Modified
+# Changed   → 200 OK with new data
+```
+
+ETag is preferred because it handles cases where the resource content didn't actually change (same content written twice) and sub-second changes (where timestamps aren't granular enough).
+
+## Server-Side Caching with Redis
+
+For expensive queries (complex joins, aggregations, external API calls), cache the result in Redis.
+
+```ts
+async function getProductWithReviews(productId: string) {
+  const cacheKey = `product:${productId}:full`;
+
+  // 1. Check cache
+  const cached = await redis.get(cacheKey);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
+  // 2. Cache miss — fetch from database
+  const [product, reviews, inventory] = await Promise.all([
+    db.products.findById(productId),
+    db.reviews.findByProduct(productId),
+    inventoryService.check(productId),
+  ]);
+
+  const result = { ...product, reviews, inventory };
+
+  // 3. Cache for 5 minutes
+  await redis.setex(cacheKey, 300, JSON.stringify(result));
+
+  return result;
+}
+```
+
+### Cache-Aside Pattern (Lazy Loading)
+
+The most common pattern. Check cache → miss → fetch from DB → write to cache → return.
+
+```ts
+// Generic cache-aside wrapper:
+async function cached<T>(
+  key: string,
+  ttlSeconds: number,
+  fetchFn: () => Promise<T>,
+): Promise<T> {
+  const hit = await redis.get(key);
+  if (hit) return JSON.parse(hit) as T;
+
+  const value = await fetchFn();
+  await redis.setex(key, ttlSeconds, JSON.stringify(value));
+  return value;
+}
+
+// Usage:
+const user = await cached(
+  `user:${userId}`,
+  3600,
+  () => userRepo.findById(userId)
+);
+```
+
+### Write-Through Pattern
+
+Write to cache at the same time as writing to the database. Cache is always up-to-date.
+
+```ts
+async function updateUser(id: string, data: Partial<User>) {
+  const updated = await userRepo.update(id, data);
+
+  // Keep cache up-to-date:
+  await redis.setex(`user:${id}`, 3600, JSON.stringify(updated));
+
+  return updated;
+}
+```
+
+### Write-Behind (Write-Back) Pattern
+
+Write to cache immediately, write to database asynchronously in the background. Fastest writes, but risk of data loss if cache fails before the DB write.
+
+Use only when occasional data loss is acceptable (analytics, non-critical counters).
+
+## Cache Invalidation
+
+The hardest problem in caching. When data changes, stale cached copies must be invalidated.
+
+### Time-Based (TTL)
+
+The simplest strategy: set an expiration time. After TTL expires, the next request fetches fresh data.
+
+```ts
+await redis.setex(key, 300, value); // expires in 5 minutes
+```
+
+**Tradeoff:** stale data for up to TTL duration. Fine for mostly static data; terrible for frequently changing data.
+
+### Explicit Invalidation
+
+Delete or update the cache entry immediately when the underlying data changes.
+
+```ts
+async function deleteUser(id: string) {
+  await userRepo.delete(id);
+  await redis.del(`user:${id}`);           // invalidate user cache
+  await redis.del(`users:list`);           // invalidate list cache
+  await redis.del(`org:${user.org_id}`);   // invalidate org cache
+}
+```
+
+The challenge: tracking which cache keys are affected by a data change. This grows complex quickly with related data.
+
+### Tag-Based Invalidation
+
+Group cache entries by tags. Invalidate all entries with a given tag at once.
+
+```ts
+// Cache with tags:
+await cache.set(
+  `post:${postId}`,
+  post,
+  { ttl: 3600, tags: [`user:${post.authorId}`, `category:${post.category}`] }
+);
+
+// Invalidate all posts by this user:
+await cache.invalidateTag(`user:${userId}`);
+```
+
+Supported natively by Cloudflare Cache Tags, Next.js `revalidateTag`, and some Redis libraries.
+
+### Cache Key Design
+
+Good cache keys are hierarchical and namespaced:
+
+```
+user:{id}                          → single user
+user:{id}:posts                    → user's posts
+org:{orgId}:users                  → all users in org
+product:{id}:reviews:page:{page}   → paginated reviews
+```
+
+Avoid collisions by namespacing:
+```ts
+const key = `${environment}:${version}:${entity}:${id}`;
+// e.g., "prod:v2:user:usr_42"
+```
+
+## What Never to Cache
+
+Some data must always be fresh:
+
+- Authentication tokens and session data — a revoked token must not be served from cache
+- Payment and financial data — stale balance is dangerous
+- Real-time data — live scores, prices, positions
+- Write responses — POST/PUT/DELETE responses should never be cached
+- Highly personalized data with security implications
+
+```http
+Authorization: Bearer ...  → always validate against the server
+POST /payments             → Cache-Control: no-store
+```
+
+## In-Memory Application Cache
+
+For extremely hot data (configuration, feature flags, static lookup tables), skip Redis and cache in the process memory:
+
+```ts
+// Simple in-process LRU cache using a Map with manual eviction:
+class LRUCache<T> {
+  private cache = new Map<string, { value: T; expiresAt: number }>();
+
+  set(key: string, value: T, ttlMs: number) {
+    this.cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+  }
+
+  get(key: string): T | null {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      this.cache.delete(key);
+      return null;
+    }
+    return entry.value;
+  }
+}
+```
+
+Use the `lru-cache` npm package for production in-process caching. Limit to small, rarely-changing datasets — in-process caches are not shared across server instances.
+
+## Caching at the HTTP Layer in Your App
+
+```ts
+// Express middleware to add cache headers:
+function cacheFor(seconds: number) {
+  return (req, res, next) => {
+    res.setHeader("Cache-Control", `public, max-age=${seconds}`);
+    next();
+  };
+}
+
+router.get("/categories", cacheFor(3600), getCategoriesHandler);
+router.get("/products/:id", cacheFor(300), getProductHandler);
+router.get("/users/:id/profile", (req, res, next) => {
+  res.setHeader("Cache-Control", "private, max-age=60");
+  next();
+}, getUserProfileHandler);
+```
+
+## Related Topics
+
+- [HTTP Fundamentals](/programming/apis/http-fundamentals) — `Cache-Control`, `ETag`, and `304` status code
+- [API Gateway](/programming/apis/api-gateway) — caching at the gateway/CDN level
+- [Error Handling](/programming/apis/error-handling) — never cache error responses

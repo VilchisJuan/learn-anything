@@ -1,0 +1,293 @@
+---
+title: Authorization
+description: Controlling what an authenticated user can do — RBAC, ABAC, OAuth scopes, permission guards, and row-level access.
+level: intermediate
+area: programming
+topic: apis
+---
+
+**Authorization** answers: **what are you allowed to do?** It happens after [authentication](/programming/apis/authentication) (who you are) and determines which resources and actions are available to you.
+
+A user who is authenticated (we know who they are) is not necessarily authorized to do everything. An authenticated employee can see their own salary — but not everyone else's.
+
+## The Two Core Questions
+
+Every authorization system answers two questions:
+
+1. **Can this user perform this action?** (e.g., can Alice delete a post?)
+2. **On this resource?** (e.g., only on posts she authored, not on all posts)
+
+The first is usually handled by roles or permissions. The second is **data-level authorization** or **row-level security** — often the trickier part.
+
+## RBAC — Role-Based Access Control
+
+The most common model. Users are assigned **roles**, and roles have **permissions**.
+
+```
+User → Role → Permissions
+Alice → admin  → [read, write, delete, manage_users]
+Bob   → editor → [read, write]
+Carol → viewer → [read]
+```
+
+### Implementation
+
+Store roles in the JWT payload or look them up from the database:
+
+```json
+{
+  "sub": "usr_42",
+  "role": "admin",
+  "exp": 1705314600
+}
+```
+
+Check the role in middleware or guards:
+
+```ts
+function requireRole(role: string) {
+  return (req, res, next) => {
+    if (req.user.role !== role) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    next();
+  };
+}
+
+// Apply to routes:
+router.delete("/users/:id", requireRole("admin"), deleteUserHandler);
+router.post("/posts", requireRole("editor"), createPostHandler);
+```
+
+### Multiple Roles
+
+Users can have multiple roles. Store as an array:
+
+```json
+{
+  "sub": "usr_42",
+  "roles": ["editor", "billing_admin"]
+}
+```
+
+```ts
+function requireAnyRole(roles: string[]) {
+  return (req, res, next) => {
+    const userRoles = req.user.roles;
+    if (!roles.some(r => userRoles.includes(r))) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    next();
+  };
+}
+```
+
+### Role Hierarchy
+
+Some systems define roles that inherit from others:
+
+```
+superadmin > admin > editor > viewer
+```
+
+A `superadmin` has all `admin` permissions plus more. Implementing hierarchies requires care — it's easy to accidentally grant too much.
+
+## ABAC — Attribute-Based Access Control
+
+More flexible than RBAC. Access is determined by **attributes** of the user, the resource, and the environment.
+
+Example policy:
+> "Allow access if the user's department is 'finance' AND the resource is a financial report AND it's during business hours."
+
+```ts
+function canAccess(user, resource, action, context) {
+  if (action === "read" && resource.type === "financial_report") {
+    return (
+      user.department === "finance" &&
+      context.hour >= 9 && context.hour <= 17
+    );
+  }
+  return false;
+}
+```
+
+ABAC is powerful but complex. Use RBAC for most cases and introduce ABAC only when you need fine-grained, context-aware rules.
+
+## OAuth2 Scopes
+
+When using [OAuth2](/programming/apis/authentication), permissions are expressed as **scopes** — strings that declare what the token is allowed to do.
+
+```
+read:users          → can list and view users
+write:users         → can create and update users
+delete:users        → can delete users
+read:orders         → can view orders
+```
+
+The user grants specific scopes when authorizing an app. The token carries those scopes, and your API enforces them:
+
+```http
+Authorization: Bearer eyJ... (token has scopes: "read:users write:orders")
+
+GET /users       → ✓ allowed (read:users)
+POST /users      → ✓ allowed (write:users? No — only write:orders) → 403
+```
+
+### Scope Enforcement
+
+```ts
+function requireScope(scope: string) {
+  return (req, res, next) => {
+    const scopes = req.user.scope?.split(" ") ?? [];
+    if (!scopes.includes(scope)) {
+      return res.status(403).json({
+        error: "insufficient_scope",
+        required_scope: scope
+      });
+    }
+    next();
+  };
+}
+
+router.get("/users", requireScope("read:users"), listUsersHandler);
+router.delete("/users/:id", requireScope("delete:users"), deleteUserHandler);
+```
+
+## Data-Level Authorization (Row-Level Security)
+
+Role checks alone are not enough. A user with the `editor` role should only edit **their own** content, not everyone else's.
+
+```ts
+async function getPost(req, res) {
+  const post = await db.posts.findById(req.params.id);
+
+  if (!post) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  // Data-level check: can this user see this post?
+  if (post.author_id !== req.user.id && req.user.role !== "admin") {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  res.json(post);
+}
+```
+
+This pattern is critical and easy to forget. Many security breaches happen because developers checked the role but not whether the resource belongs to the requesting user.
+
+### Tenant Isolation
+
+In [multi-tenant](/programming/apis/multi-tenancy) systems, always filter data by tenant ID:
+
+```ts
+// Wrong — returns all orders
+const orders = await db.orders.findAll();
+
+// Correct — only orders for this tenant
+const orders = await db.orders.findAll({
+  where: { tenant_id: req.user.tenant_id }
+});
+```
+
+Forgetting the `tenant_id` filter is a critical data leak.
+
+## Permission Guards in Frameworks
+
+Most frameworks have a standard way to express authorization:
+
+### Express.js (middleware pattern)
+```ts
+const guard = (...roles) => (req, res, next) => {
+  if (!roles.includes(req.user.role)) return res.sendStatus(403);
+  next();
+};
+
+router.post("/admin/users", guard("admin"), createUserHandler);
+```
+
+### NestJS (decorators)
+```ts
+@UseGuards(AuthGuard, RolesGuard)
+@Roles("admin")
+@Delete("/users/:id")
+deleteUser(@Param("id") id: string) { ... }
+```
+
+### Django REST Framework
+```python
+class IsAdminOrOwner(BasePermission):
+    def has_object_permission(self, request, view, obj):
+        return request.user.is_admin or obj.owner == request.user
+```
+
+## The Principle of Least Privilege
+
+Grant the minimum permissions needed to accomplish a task. This limits damage if a token is stolen or a bug allows unauthorized access.
+
+```
+// Too permissive:
+token.scopes = ["admin:all"]
+
+// Principle of least privilege:
+token.scopes = ["read:orders", "write:orders"]
+// This service only needs to read and write orders — not manage users or billing
+```
+
+Apply this to:
+- **API tokens** — each service gets only the scopes it needs
+- **Database users** — the app DB user should not have `DROP TABLE` privileges
+- **Service accounts** — cloud service accounts scoped to specific resources
+- **Third-party OAuth** — only request the scopes your app actually needs
+
+## Returning 403 vs 404
+
+A subtle but important decision: when a user requests a resource they're not authorized to see, do you return `403 Forbidden` or `404 Not Found`?
+
+**403** reveals that the resource exists (the user is just not allowed to see it). This can be an information leak — an attacker can probe which IDs exist.
+
+**404** hides the existence of the resource. Safer for sensitive data (e.g., medical records, private messages).
+
+Convention: use `404` if acknowledging the resource's existence is itself a security concern. Use `403` otherwise.
+
+## Policy-Based Authorization
+
+As systems grow, scattered `if (user.role === "admin")` checks become hard to maintain and audit. A **policy** centralizes the authorization logic:
+
+```ts
+// policies/post.policy.ts
+export const PostPolicy = {
+  read: (user, post) =>
+    post.status === "published" || post.author_id === user.id || user.role === "admin",
+
+  update: (user, post) =>
+    post.author_id === user.id || user.role === "admin",
+
+  delete: (user, post) =>
+    user.role === "admin",
+};
+
+// In the handler:
+if (!PostPolicy.update(req.user, post)) {
+  return res.status(403).json({ error: "Forbidden" });
+}
+```
+
+Libraries like **CASL** (JavaScript) and **Pundit** (Ruby) formalize this pattern.
+
+## Authorization vs Authentication Errors
+
+| Scenario | Code | Message |
+|---|---|---|
+| No token provided | `401 Unauthorized` | "Authentication required" |
+| Token is invalid or expired | `401 Unauthorized` | "Invalid or expired token" |
+| Token is valid but wrong role | `403 Forbidden` | "Insufficient permissions" |
+| Token is valid but wrong scope | `403 Forbidden` | "Insufficient scope: requires read:admin" |
+| Resource doesn't exist | `404 Not Found` | "Not found" |
+| Resource exists but hidden for security | `404 Not Found` | "Not found" |
+
+## Related Topics
+
+- [Authentication](/programming/apis/authentication) — establishing identity before authorization
+- [Security](/programming/apis/security) — broader API security concerns
+- [Multi-Tenancy](/programming/apis/multi-tenancy) — tenant-level authorization and data isolation
