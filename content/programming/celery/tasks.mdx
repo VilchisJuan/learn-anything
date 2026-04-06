@@ -1,0 +1,219 @@
+---
+title: Tasks & Signatures
+description: Define, call, retry, and compose Celery tasks using signatures and calling conventions.
+level: intermediate
+---
+
+# Tasks & Signatures
+
+A **task** is a Python function registered with Celery that can be executed asynchronously by a [worker](/programming/celery/worker). A **signature** is a serializable description of a task call — the function plus its arguments — that can be passed around and executed later.
+
+## Defining a Task
+
+```python
+from celery import Celery
+
+app = Celery("myapp", broker="redis://localhost:6379/0")
+
+@app.task
+def send_email(to: str, subject: str, body: str) -> bool:
+    # ... email sending logic ...
+    return True
+```
+
+The `@app.task` decorator registers the function with Celery. The task's name defaults to `"myapp.tasks.send_email"`.
+
+### Custom Task Name
+
+```python
+@app.task(name="notifications.send_email")
+def send_email(to, subject, body):
+    ...
+```
+
+Stable names matter if you rename or move files — old tasks in the queue still reference the original name.
+
+## Calling Tasks
+
+### `delay()` — Simple Async Call
+
+```python
+send_email.delay("alice@example.com", "Hello", "Hi Alice!")
+```
+
+The task is immediately enqueued. Your code continues without waiting.
+
+### `apply_async()` — Full Control
+
+```python
+send_email.apply_async(
+    args=["alice@example.com"],
+    kwargs={"subject": "Hello", "body": "Hi Alice!"},
+    countdown=60,            # run in 60 seconds
+    expires=3600,            # discard if not run within 1 hour
+    queue="emails",          # send to a specific queue
+    priority=5,              # broker-level priority (RabbitMQ)
+    retry=True,
+)
+```
+
+### `apply()` — Synchronous (Blocking)
+
+Runs the task in the current process. Useful in tests.
+
+```python
+result = send_email.apply(args=["alice@example.com", "Hi", "Body"])
+print(result.get())  # True
+```
+
+## AsyncResult — Tracking Task State
+
+```python
+result = send_email.delay("alice@example.com", "Hi", "Body")
+
+print(result.id)        # unique task ID (UUID)
+print(result.status)    # PENDING, STARTED, SUCCESS, FAILURE, RETRY, REVOKED
+print(result.ready())   # True if done
+print(result.successful())  # True if SUCCESS
+print(result.get(timeout=10))  # block and return value (or raise on failure)
+```
+
+States:
+- `PENDING` — task not yet started (or unknown ID)
+- `STARTED` — worker picked it up (requires `task_track_started = True`)
+- `SUCCESS` — completed successfully
+- `FAILURE` — raised an exception
+- `RETRY` — being retried
+- `REVOKED` — cancelled
+
+## Retries
+
+Tasks can automatically retry on failure:
+
+```python
+@app.task(bind=True, max_retries=3, default_retry_delay=60)
+def fetch_data(self, url: str):
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as exc:
+        raise self.retry(exc=exc, countdown=2 ** self.request.retries)
+```
+
+- `bind=True` — passes `self` (the task instance) so you can call `self.retry()`
+- `max_retries=3` — give up after 3 retries
+- `countdown=2 ** self.request.retries` — exponential backoff: 1s, 2s, 4s, …
+
+### Retrying with `autoretry_for`
+
+```python
+@app.task(
+    autoretry_for=(requests.Timeout, requests.ConnectionError),
+    max_retries=5,
+    retry_backoff=True,       # exponential backoff
+    retry_backoff_max=600,    # cap at 10 minutes
+    retry_jitter=True,        # add randomness to avoid thundering herd
+)
+def fetch_data(url: str):
+    return requests.get(url, timeout=5).json()
+```
+
+## Task Options via Decorator
+
+```python
+@app.task(
+    name="myapp.send_email",
+    max_retries=3,
+    default_retry_delay=30,
+    soft_time_limit=120,   # raises SoftTimeLimitExceeded after 120s
+    time_limit=180,        # hard kill after 180s
+    acks_late=True,        # acknowledge only after execution
+    ignore_result=True,    # don't store result in backend
+)
+def send_email(to, subject, body):
+    ...
+```
+
+## Signatures
+
+A **signature** wraps a task call into a reusable, composable object:
+
+```python
+from myapp.tasks import add
+
+sig = add.s(4, 6)           # positional args
+sig = add.si(4, 6)          # immutable — ignores input from previous task in chain
+sig = add.s(x=4, y=6)      # keyword args
+
+sig.delay()                 # enqueue it
+sig.apply_async(countdown=10)
+```
+
+Signatures are JSON-serializable, so they can be passed to [Canvas](/programming/celery/canvas) primitives like chains and groups.
+
+### Partial Signatures
+
+```python
+# Provide some args now, more later
+partial_sig = add.s(4)  # one arg pending
+partial_sig.delay(6)    # adds 6 → add(4, 6)
+```
+
+## Task Context (`request`)
+
+Inside a task, `self.request` gives you runtime metadata (when `bind=True`):
+
+```python
+@app.task(bind=True)
+def my_task(self):
+    print(self.request.id)          # task UUID
+    print(self.request.retries)     # retry count
+    print(self.request.queue)       # which queue
+    print(self.request.eta)         # scheduled ETA
+    print(self.request.callbacks)   # downstream callbacks
+```
+
+## Idempotency
+
+A task is **idempotent** if running it multiple times produces the same result as running it once. Always design tasks to be idempotent — retries and at-least-once delivery guarantees mean your task *will* occasionally run more than once.
+
+```python
+# NOT idempotent — duplicates rows on retry
+@app.task
+def create_user(email):
+    User.objects.create(email=email)
+
+# Idempotent — safe to retry
+@app.task
+def create_user(email):
+    User.objects.get_or_create(email=email)
+```
+
+## Hooks: `on_success`, `on_failure`, `on_retry`
+
+```python
+@app.task(bind=True)
+def process(self, data):
+    ...
+
+    def on_success(self, retval, task_id, args, kwargs):
+        notify_success(task_id)
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        alert_team(exc)
+```
+
+Or use **signals** for app-wide hooks (see [Configuration](/programming/celery/configuration)).
+
+## Revoking Tasks
+
+Cancel a queued (not yet started) task:
+
+```python
+result = process.delay(data)
+result.revoke()                 # cancel if not started
+result.revoke(terminate=True)   # kill even if running
+```
+
+Revoked task IDs are stored in-memory by default — workers forget them on restart. Use a persistent revoke store for durability.

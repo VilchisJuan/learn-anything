@@ -1,0 +1,114 @@
+---
+title: What is Celery?
+description: Understand distributed task queues, why they exist, and what problems Celery solves.
+level: beginner
+---
+
+# What is Celery?
+
+Celery is an open-source **distributed task queue** written in Python. It lets you offload time-consuming or recurring work from your web request cycle into background processes that run independently — often on separate machines.
+
+## The Problem Celery Solves
+
+Imagine a user uploads a video. Encoding it takes 3 minutes. You don't want to make the user wait with a spinning browser tab — and you don't want your web server holding an HTTP connection open for 3 minutes.
+
+The answer is a **task queue**:
+
+1. The web server receives the request and immediately enqueues a "encode this video" job.
+2. It responds to the user: *"Your video is processing."*
+3. A **worker** process picks up the job from the queue and does the heavy lifting in the background.
+4. When done, the worker can store the result or notify the user.
+
+This pattern is called **producer–consumer** or **publisher–subscriber**.
+
+## Core Concepts
+
+| Concept | Description |
+|---|---|
+| **Task** | A Python function decorated with `@app.task` that can be queued and executed asynchronously |
+| **Broker** | A message transport (Redis, RabbitMQ) that holds queued tasks |
+| **Worker** | A process that consumes tasks from the broker and executes them |
+| **Result Backend** | A store (Redis, database) that holds task return values and status |
+| **Beat** | A scheduler that enqueues periodic tasks on a cron-like schedule |
+
+## How They Fit Together
+
+```
+Your App  ──► Broker (Redis/RabbitMQ) ──► Worker
+              (task queue)                  │
+                                            ▼
+                                      Result Backend
+                                      (Redis/DB/etc.)
+```
+
+Your application **produces** tasks; workers **consume** them. The broker is the pipe between the two.
+
+## A Minimal Example
+
+```python
+# tasks.py
+from celery import Celery
+
+app = Celery("myapp", broker="redis://localhost:6379/0")
+
+@app.task
+def add(x, y):
+    return x + y
+```
+
+```python
+# Anywhere in your app — enqueue without blocking
+result = add.delay(4, 6)
+
+# Later, fetch the result (requires a result backend)
+print(result.get())  # 10
+```
+
+`delay()` sends the task to the broker immediately and returns an `AsyncResult` handle. Your code moves on; the worker picks it up in the background.
+
+## When to Use Celery
+
+- Sending emails or push notifications
+- Generating reports, PDFs, or thumbnails
+- Calling slow third-party APIs
+- Syncing data between systems
+- Running ML inference jobs
+- Any recurring scheduled work (cron jobs)
+
+## When NOT to Use Celery
+
+Celery adds operational complexity (broker + workers to deploy and monitor). For very simple cases, consider:
+
+- **Threading / asyncio** — if the workload is I/O-bound and single-machine
+- **APScheduler** — lightweight in-process scheduling without a broker
+- **RQ (Redis Queue)** — simpler API, fewer features, Redis-only
+
+Once you need multi-machine parallelism, reliable retries, or complex task workflows, Celery earns its keep.
+
+## Key Terminology
+
+**Asynchronous** — the task runs in a separate process; your code doesn't wait.
+
+**Distributed** — workers can run on many machines, all pulling from the same broker.
+
+**Idempotent** — a task is idempotent if running it twice has the same effect as running it once. Always aim for idempotent tasks so retries are safe.
+
+**ETA / Countdown** — you can schedule a task to run at a specific time or after a delay:
+
+```python
+add.apply_async((4, 6), countdown=30)   # run in 30 seconds
+add.apply_async((4, 6), eta=datetime(2026, 1, 1))  # run at a specific time
+```
+
+## Celery's Architecture Components
+
+The next lessons cover each component in depth:
+
+- [Celery Worker](/programming/celery/worker) — the process that runs your tasks
+- [Celery Beat](/programming/celery/beat) — the periodic task scheduler
+- [Tasks & Signatures](/programming/celery/tasks) — how to define and call tasks
+- [Brokers](/programming/celery/brokers) — Redis vs RabbitMQ
+- [Result Backends](/programming/celery/results) — storing task outcomes
+- [Canvas](/programming/celery/canvas) — chains, groups, and chords for complex workflows
+- [Flower](/programming/celery/flower) — real-time monitoring dashboard
+- [Configuration & Best Practices](/programming/celery/configuration) — production-ready setup

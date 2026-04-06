@@ -1,0 +1,162 @@
+---
+title: Celery Beat
+description: Schedule periodic and recurring tasks with Celery Beat — the built-in cron-like scheduler.
+level: intermediate
+---
+
+# Celery Beat
+
+**Celery Beat** is Celery's built-in scheduler. It works like a cron daemon: it wakes up at the right time and enqueues tasks into the broker, where a [worker](/programming/celery/worker) picks them up and executes them.
+
+```
+Beat ──enqueues──► Broker ──► Worker ──► executes task
+```
+
+Beat does **not** execute tasks itself — it only schedules them.
+
+## Starting Beat
+
+```bash
+celery -A myapp beat --loglevel=info
+```
+
+Run this **alongside** at least one worker. Beat and worker are separate processes.
+
+> **Never run more than one Beat process** against the same schedule. Two Beat processes would enqueue every task twice.
+
+## Defining a Schedule
+
+### In Your Celery App Config
+
+```python
+from celery import Celery
+from celery.schedules import crontab
+
+app = Celery("myapp", broker="redis://localhost:6379/0")
+
+app.conf.beat_schedule = {
+    "send-report-every-monday": {
+        "task": "myapp.tasks.send_weekly_report",
+        "schedule": crontab(hour=9, minute=0, day_of_week="monday"),
+    },
+    "cleanup-every-midnight": {
+        "task": "myapp.tasks.cleanup_old_sessions",
+        "schedule": crontab(hour=0, minute=0),
+    },
+    "heartbeat-every-30s": {
+        "task": "myapp.tasks.heartbeat",
+        "schedule": 30.0,  # every 30 seconds
+    },
+}
+```
+
+### Schedule Types
+
+| Type | Example | Meaning |
+|---|---|---|
+| `float` / `int` | `30.0` | Every N seconds |
+| `timedelta` | `timedelta(hours=1)` | Every hour |
+| `crontab` | `crontab(minute="*/15")` | Cron syntax |
+| `solar` | `solar("sunrise", lat, lng)` | Sunrise/sunset |
+
+### `crontab` Reference
+
+```python
+from celery.schedules import crontab
+
+crontab()                               # every minute
+crontab(minute=0)                       # top of every hour
+crontab(hour=8, minute=30)              # 8:30 AM every day
+crontab(day_of_week="mon,fri")          # Mondays and Fridays
+crontab(day_of_month="1")              # 1st of every month
+crontab(month_of_year="1,7")           # January and July
+crontab(minute="*/15")                  # every 15 minutes
+```
+
+## Passing Arguments to Scheduled Tasks
+
+```python
+app.conf.beat_schedule = {
+    "generate-pdf-report": {
+        "task": "myapp.tasks.generate_report",
+        "schedule": crontab(hour=6, minute=0),
+        "args": ("monthly",),
+        "kwargs": {"format": "pdf", "send_email": True},
+    },
+}
+```
+
+## The Schedule Database
+
+Beat tracks **when each task last ran** in a local file called `celerybeat-schedule` (a shelve database). This ensures it doesn't double-fire tasks after a restart.
+
+```bash
+# Custom schedule file location
+celery -A myapp beat -s /var/run/celerybeat-schedule
+```
+
+Do **not** delete this file while beat is running, or it may re-fire tasks immediately on restart.
+
+## django-celery-beat (Dynamic Schedules)
+
+The built-in schedule is static — you must restart Beat to change it. For **dynamic schedules editable at runtime** (e.g., via an admin UI), use `django-celery-beat`:
+
+```bash
+pip install django-celery-beat
+```
+
+```python
+# settings.py
+INSTALLED_APPS = [
+    ...
+    "django_celery_beat",
+]
+
+# celery.py
+app.conf.beat_scheduler = "django_celery_beat.schedulers:DatabaseScheduler"
+```
+
+Now your schedule lives in the database. Django admin gets a UI to add/edit/delete periodic tasks without any code changes or restarts.
+
+## Timezone
+
+Beat respects the `timezone` setting:
+
+```python
+app.conf.timezone = "America/New_York"
+app.conf.enable_utc = True
+```
+
+Always set a timezone explicitly. Default is UTC — make sure your crontab hours match what you intend.
+
+## Beat + Worker in One Process (Dev Only)
+
+For local development you can run beat and worker in a single process:
+
+```bash
+celery -A myapp worker --beat --loglevel=info
+```
+
+**Never do this in production** — if the process crashes, both scheduling and execution stop.
+
+## Deployment Checklist
+
+- Run exactly **one** Beat process
+- Run Beat and workers as separate OS services (systemd, supervisord, Docker containers)
+- Mount the schedule file on persistent storage (not a Docker ephemeral layer)
+- Set `timezone` explicitly
+- Monitor Beat with [Flower](/programming/celery/flower) — if Beat stops, scheduled tasks silently stop running
+
+## Troubleshooting
+
+**Tasks not running on schedule**
+- Confirm Beat is running (`celery -A myapp inspect ping` won't show Beat — check the process list)
+- Check Beat logs for scheduling output
+- Verify the timezone matches your expectation
+
+**Tasks run twice**
+- You have two Beat processes running — kill one
+
+**Tasks ran many times after restart**
+- Beat's schedule file was deleted or corrupted — it thought tasks had never run
+- Restore the schedule file from backup, or accept the one-time burst and re-create it

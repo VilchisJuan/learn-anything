@@ -1,0 +1,203 @@
+---
+title: Brokers
+description: Compare Redis and RabbitMQ as Celery message brokers — features, trade-offs, and configuration.
+level: intermediate
+---
+
+# Brokers
+
+The **broker** is the message transport that sits between your application and [Celery workers](/programming/celery/worker). Your app publishes task messages to the broker; workers subscribe and consume them.
+
+```
+App  ──publish──► Broker ──deliver──► Worker
+```
+
+Celery supports several brokers. The two most common in production are **Redis** and **RabbitMQ**.
+
+## Redis
+
+Redis is the simplest choice and the most popular for Celery deployments. It doubles as both broker and [result backend](/programming/celery/results).
+
+### Setup
+
+```bash
+pip install celery[redis]
+```
+
+```python
+app = Celery(
+    "myapp",
+    broker="redis://localhost:6379/0",
+    backend="redis://localhost:6379/1",
+)
+```
+
+URL format: `redis://[:password@]host[:port]/db`
+
+For Redis Sentinel (HA):
+
+```python
+broker_url = "sentinel://sentinel1:26379;sentinel2:26379/mymaster/0"
+broker_transport_options = {
+    "master_name": "mymaster",
+}
+```
+
+For Redis Cluster:
+
+```python
+broker_url = "rediss://cluster-host:6379/0"  # rediss = TLS
+```
+
+### How Redis Queues Work
+
+Celery uses Redis **lists** as queues (`LPUSH` to enqueue, `BRPOP` to consume). This is simple and fast but has limitations:
+
+- **No message acknowledgment at the broker level** — if a worker crashes after `BRPOP` but before finishing the task, the message is gone. Celery emulates acks in software, so this risk is managed by `acks_late`.
+- **No message priorities** — Redis lists are FIFO only (Redis Streams support priorities, but Celery's Redis transport uses lists).
+- **Messages are in-memory** — persistence depends on your Redis `appendonly` / RDB configuration.
+
+### When to Use Redis
+
+- You already run Redis (for caching, sessions, etc.)
+- You want the simplest possible setup
+- Your workload doesn't need advanced broker features (priorities, dead-letter queues at the broker level, fanout exchanges)
+
+---
+
+## RabbitMQ
+
+RabbitMQ is a purpose-built message broker implementing the AMQP protocol. It offers richer guarantees and routing features.
+
+### Setup
+
+```bash
+pip install celery[librabbitmq]   # fast C extension
+# or
+pip install celery[amqp]          # pure Python
+```
+
+```python
+app = Celery(
+    "myapp",
+    broker="amqp://user:password@localhost:5672/myvhost",
+)
+```
+
+URL format: `amqp://user:password@host:port/vhost`
+
+For TLS: `amqps://...`
+
+### AMQP Concepts
+
+RabbitMQ introduces a layer of indirection that Redis lacks:
+
+```
+Producer ──► Exchange ──routing_key──► Queue ──► Consumer
+```
+
+- **Exchange** — receives messages and routes them to queues based on routing keys and bindings. Celery creates a `direct` exchange by default.
+- **Queue** — durable or transient buffer of messages
+- **Binding** — rule connecting an exchange to a queue
+
+Celery abstracts this, but you can configure custom exchanges and routing for fine-grained control.
+
+### Durable Queues and Persistent Messages
+
+RabbitMQ can persist both queues and messages to disk, surviving broker restarts:
+
+```python
+# celeryconfig.py
+task_queues = [
+    Queue("default", Exchange("default"), routing_key="default",
+          queue_arguments={"x-max-priority": 10}),
+]
+task_default_queue = "default"
+
+# Durable delivery mode
+task_default_delivery_mode = "persistent"  # 2 = persistent, 1 = transient
+```
+
+### Dead-Letter Queues
+
+RabbitMQ supports dead-letter exchanges — messages that expire or are rejected go to a separate queue for inspection:
+
+```python
+from kombu import Queue, Exchange
+
+dead_letter_exchange = Exchange("dead_letter", type="direct")
+
+task_queues = [
+    Queue(
+        "default",
+        Exchange("default"),
+        routing_key="default",
+        queue_arguments={
+            "x-dead-letter-exchange": "dead_letter",
+            "x-message-ttl": 86400000,  # 24 hours in ms
+        },
+    ),
+]
+```
+
+### Priority Queues
+
+RabbitMQ supports per-message priorities (0–255):
+
+```python
+task_queues = [
+    Queue("default", queue_arguments={"x-max-priority": 10}),
+]
+```
+
+```python
+send_email.apply_async(args=[...], priority=8)
+```
+
+### When to Use RabbitMQ
+
+- You need true message durability and persistence guarantees
+- You need message priorities or dead-letter queues at the broker level
+- You need complex routing (topic exchanges, fanout)
+- You want strong AMQP semantics
+
+---
+
+## Broker Comparison
+
+| Feature | Redis | RabbitMQ |
+|---|---|---|
+| Setup complexity | Low | Medium |
+| Message persistence | Via Redis config | Native, per-queue |
+| Acknowledgment | Software-level | Protocol-level (AMQP) |
+| Priorities | No | Yes (x-max-priority) |
+| Dead-letter queues | No | Yes |
+| Fanout / pub-sub | Via PubSub | Yes (fanout exchange) |
+| Result backend | Built-in | Needs separate backend |
+| Monitoring | Redis CLI, RedisInsight | RabbitMQ Management UI |
+| Cluster support | Redis Cluster / Sentinel | RabbitMQ Clustering |
+
+## Other Brokers
+
+Celery also supports:
+
+- **Amazon SQS** — managed, serverless. No persistent connections needed. Good for AWS-native stacks.
+- **Kafka** (via `celery-kafka`) — high-throughput event streams. Unusual choice but possible.
+- **Zookeeper** — experimental.
+
+For most use cases, Redis is the right first choice. Graduate to RabbitMQ when you hit its limitations.
+
+## Connection Pooling and Reliability
+
+Celery maintains a connection pool to the broker. In production:
+
+```python
+# Reconnect if broker restarts
+broker_connection_retry_on_startup = True
+broker_connection_max_retries = 10
+
+# Pool size
+broker_pool_limit = 10
+```
+
+Always run your broker with persistence enabled and in a HA configuration (Redis Sentinel or RabbitMQ cluster) for production workloads.

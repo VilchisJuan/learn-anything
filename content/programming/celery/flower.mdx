@@ -1,0 +1,238 @@
+---
+title: Flower — Monitoring
+description: Monitor and inspect your Celery cluster in real time with the Flower web dashboard.
+level: intermediate
+---
+
+# Flower — Monitoring
+
+**Flower** is a real-time web dashboard for monitoring and administering Celery clusters. It shows workers, tasks, queues, and statistics — and lets you inspect, revoke, and re-queue tasks from a browser.
+
+## Installation
+
+```bash
+pip install flower
+```
+
+## Starting Flower
+
+```bash
+celery -A myapp flower
+```
+
+Flower starts on **http://localhost:5555** by default.
+
+### Custom Port and Address
+
+```bash
+celery -A myapp flower --port=8888 --address=0.0.0.0
+```
+
+### With a Broker URL
+
+```bash
+celery -A myapp flower --broker=redis://localhost:6379/0
+```
+
+Flower connects directly to the broker to inspect queues. For the [result backend](/programming/celery/results) data it also connects there separately.
+
+---
+
+## Dashboard Overview
+
+### Workers Tab
+
+Shows all active workers with:
+
+- Worker name and hostname
+- Status (Online / Offline)
+- Active tasks (currently running)
+- Processed task count
+- Concurrency (pool size)
+- Load average
+
+Click a worker to see its details, registered tasks, and active/reserved task queue.
+
+### Tasks Tab
+
+Lists all task executions with:
+
+- Task name and UUID
+- State (SUCCESS, FAILURE, STARTED, RETRY…)
+- Worker that ran it
+- Start time and runtime
+- Arguments and keyword arguments
+- Return value or exception traceback
+
+Filter by task name, state, date range, or worker.
+
+### Broker Tab
+
+Shows queue depths — how many tasks are waiting in each queue. This is the key metric for detecting backlog:
+
+- If a queue keeps growing, you need more workers
+- If queues are always empty, you may have too many workers
+
+### Monitor Tab
+
+Live charts for:
+
+- Task throughput (tasks/second)
+- Task success/failure rate
+- Worker load
+
+---
+
+## Task Operations from Flower
+
+### Revoke a Task
+
+Click any task → **Revoke** button. Cancels a queued task or (optionally) terminates a running one.
+
+### Retry a Task
+
+Click a failed task → **Retry** → re-enqueues it with the same arguments.
+
+### Inspect a Worker
+
+Click a worker → see its pool, concurrency, active tasks, and registered task list. You can also:
+
+- **Shutdown** the worker gracefully
+- **Pool grow/shrink** — adjust concurrency without restarting
+
+---
+
+## Authentication
+
+Flower has no authentication by default — anyone who can reach the port can see task arguments, results, and control workers.
+
+### Basic Auth
+
+```bash
+celery -A myapp flower --basic_auth=admin:supersecret
+```
+
+### Multiple Users
+
+```bash
+celery -A myapp flower --basic_auth=alice:pass1,bob:pass2
+```
+
+### Reverse Proxy with Nginx
+
+In production, put Flower behind Nginx with SSL and restrict access by IP or VPN:
+
+```nginx
+location /flower/ {
+    proxy_pass http://localhost:5555;
+    proxy_set_header Host $host;
+    proxy_redirect off;
+    auth_basic "Restricted";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+}
+```
+
+```bash
+celery -A myapp flower --url_prefix=flower
+```
+
+---
+
+## Prometheus Metrics
+
+Flower exposes a Prometheus-compatible metrics endpoint:
+
+```
+GET http://localhost:5555/metrics
+```
+
+Example metrics:
+
+```
+flower_events_total{task="myapp.tasks.send_email",type="task-succeeded"} 1423.0
+flower_task_runtime_seconds{task="myapp.tasks.send_email"} 0.28
+flower_workers_online 4.0
+```
+
+Scrape with Prometheus and build Grafana dashboards for production-grade observability.
+
+---
+
+## Persistent Events
+
+By default, Flower stores events in memory — history is lost on restart. Enable persistent storage:
+
+```bash
+celery -A myapp flower --persistent=True --db=flower.db --max_tasks=10000
+```
+
+This stores events in a SQLite file. `max_tasks` limits the history size.
+
+---
+
+## Running Flower in Docker
+
+```dockerfile
+# Dockerfile.flower
+FROM python:3.12-slim
+RUN pip install celery[redis] flower
+CMD ["celery", "-A", "myapp", "flower", "--port=5555", "--address=0.0.0.0"]
+```
+
+```yaml
+# docker-compose.yml
+services:
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile.flower
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+```
+
+---
+
+## Celery Inspect (CLI Alternative)
+
+For quick checks without Flower:
+
+```bash
+# List active tasks on all workers
+celery -A myapp inspect active
+
+# List scheduled (ETA) tasks
+celery -A myapp inspect scheduled
+
+# List reserved (prefetched) tasks
+celery -A myapp inspect reserved
+
+# Ping workers
+celery -A myapp inspect ping
+
+# Queue stats
+celery -A myapp inspect stats
+
+# Control: revoke a task
+celery -A myapp control revoke <task-id> --terminate
+
+# Control: rate-limit a task
+celery -A myapp control rate_limit myapp.tasks.send_email 100/m
+```
+
+---
+
+## What to Monitor in Production
+
+| Metric | Alert When |
+|---|---|
+| Queue depth | Growing faster than workers can drain it |
+| Task failure rate | > N% failures over M minutes |
+| Task runtime | P99 latency exceeds SLA |
+| Worker count | Drops below minimum expected count |
+| Retry rate | Unusual spike may indicate upstream failure |
+
+Pair Flower's Prometheus endpoint with Grafana for alerts.

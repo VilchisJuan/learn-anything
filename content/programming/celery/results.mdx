@@ -1,0 +1,196 @@
+---
+title: Result Backends
+description: Store task results and track status with Celery result backends — Redis, database, and more.
+level: intermediate
+---
+
+# Result Backends
+
+A **result backend** stores the return value and status of completed tasks so your application can retrieve them later using an `AsyncResult` handle.
+
+Without a result backend, `result.get()` raises `NotImplementedError` and you can't track task status.
+
+## Do You Need a Result Backend?
+
+Only if you:
+- Need to retrieve a task's return value
+- Need to check whether a task succeeded or failed
+- Use [Canvas workflows](/programming/celery/canvas) with chords (which require results internally)
+
+If your tasks are fire-and-forget (send email, trigger webhook, clean up DB rows), you can disable the result backend entirely:
+
+```python
+app.conf.task_ignore_result = True
+
+# Or per-task
+@app.task(ignore_result=True)
+def send_notification(user_id):
+    ...
+```
+
+This eliminates write overhead and avoids cluttering your backend with result data.
+
+## Redis Backend
+
+The most common choice — usually the same Redis instance as your [broker](/programming/celery/brokers).
+
+```python
+app = Celery(
+    "myapp",
+    broker="redis://localhost:6379/0",
+    backend="redis://localhost:6379/1",  # use a different DB number
+)
+```
+
+Results are stored as Redis keys with a TTL.
+
+### Result Expiration
+
+```python
+# celeryconfig.py
+result_expires = 3600  # seconds — default is 1 day
+```
+
+Results older than `result_expires` are automatically deleted. For Redis, this maps directly to a `EXPIRE` on the key.
+
+### Redis Key Format
+
+```
+celery-task-meta-<task-uuid>
+```
+
+You can inspect results directly:
+
+```bash
+redis-cli GET celery-task-meta-abc123
+```
+
+---
+
+## Database Backend (Django ORM)
+
+Using `django-celery-results`:
+
+```bash
+pip install django-celery-results
+```
+
+```python
+# settings.py
+INSTALLED_APPS = ["django_celery_results"]
+
+# celery.py
+app.conf.result_backend = "django-db"
+```
+
+```bash
+python manage.py migrate  # creates django_celery_results_taskresult table
+```
+
+Results are stored in SQL. You can query them, display them in admin, and join them to other models.
+
+```python
+from django_celery_results.models import TaskResult
+
+result = TaskResult.objects.get(task_id="abc-123")
+print(result.status, result.result)
+```
+
+Good for audit trails, but adds DB write load. Use a cache-based backend for high-throughput tasks.
+
+### Django Cache Backend
+
+```python
+app.conf.result_backend = "django-cache"
+```
+
+Uses whatever Django cache backend you've configured (Redis, Memcached, etc.). Faster than the DB backend; no SQL writes.
+
+---
+
+## SQLAlchemy Backend
+
+For non-Django Python apps with a SQL database:
+
+```python
+app.conf.result_backend = "db+postgresql://user:pass@localhost/mydb"
+# or
+app.conf.result_backend = "db+sqlite:///results.db"
+```
+
+Celery creates a `celery_taskmeta` table automatically.
+
+---
+
+## Filesystem Backend
+
+For development or single-machine setups:
+
+```python
+app.conf.result_backend = "file:///var/celery/results"
+```
+
+Each task result is stored as a JSON file. Not suitable for production or distributed workers.
+
+---
+
+## Retrieving Results
+
+```python
+from celery.result import AsyncResult
+
+result = AsyncResult("task-uuid-here", app=app)
+
+print(result.status)          # PENDING, SUCCESS, FAILURE, ...
+print(result.ready())         # True if done
+print(result.successful())    # True if SUCCESS
+print(result.failed())        # True if FAILURE
+
+value = result.get(timeout=30)     # blocks up to 30s, raises on failure
+value = result.get(propagate=False) # returns exception object instead of raising
+```
+
+**Important:** calling `result.get()` from inside a task blocks a worker slot and can cause deadlocks in chord workflows. Avoid it.
+
+---
+
+## Grouped Results
+
+```python
+from celery import group
+from myapp.tasks import add
+
+job = group(add.s(i, i) for i in range(10))
+result = job.apply_async()
+
+results = result.get()  # [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
+```
+
+See [Canvas](/programming/celery/canvas) for composing result-dependent workflows.
+
+---
+
+## Backend Comparison
+
+| Backend | Persistence | Speed | Scale | Best For |
+|---|---|---|---|---|
+| Redis | Configurable | Fast | High | Most production use cases |
+| Django DB | Yes (SQL) | Slow | Medium | Audit trails, admin visibility |
+| Django Cache | Configurable | Fast | High | Django apps, no audit need |
+| SQLAlchemy | Yes (SQL) | Slow | Medium | Non-Django Python apps |
+| Filesystem | No | Fast | Single machine | Development only |
+| RPC | No | Fast | — | Single result retrieval |
+| Amazon S3 | Yes | Medium | High | AWS-native, large payloads |
+
+---
+
+## Result Security
+
+Task results can contain sensitive data. Ensure:
+
+- Your Redis backend is not publicly accessible
+- Redis is password-protected (`requirepass`)
+- Use TLS (`rediss://`) in production
+- Results are expired quickly if they contain PII
+
+Never store raw credentials, tokens, or full user objects as task return values.

@@ -1,0 +1,186 @@
+---
+title: Celery Worker
+description: How Celery workers consume tasks, concurrency models, pools, and operational patterns.
+level: intermediate
+---
+
+# Celery Worker
+
+A **Celery worker** is a long-running process that connects to the broker, pulls tasks off the queue, and executes them. You can run many workers — on the same machine or across a fleet of servers — and they all share the same queue.
+
+## Starting a Worker
+
+```bash
+celery -A myapp worker --loglevel=info
+```
+
+- `-A myapp` — points to your Celery application instance
+- `--loglevel=info` — log verbosity (`debug`, `info`, `warning`, `error`, `critical`)
+
+The worker prints its configuration on startup, including how many concurrent slots it has and which queues it listens to.
+
+## Concurrency and Pools
+
+The worker can process multiple tasks at the same time using a **pool**. Celery supports several pool backends:
+
+### Prefork (default)
+
+Uses Python's `multiprocessing`. Spawns N child processes, each running tasks independently.
+
+```bash
+celery -A myapp worker --pool=prefork --concurrency=8
+```
+
+- Best for **CPU-bound** tasks (number crunching, image processing)
+- Each child is a full Python process — memory overhead per child
+- Default concurrency = number of CPU cores
+
+### Gevent / Eventlet
+
+Green-thread pools for **I/O-bound** tasks (HTTP calls, DB queries).
+
+```bash
+pip install gevent
+celery -A myapp worker --pool=gevent --concurrency=500
+```
+
+- Thousands of concurrent tasks with low memory
+- Works by monkey-patching blocking I/O calls to be async
+- Does **not** help CPU-bound tasks (GIL still applies)
+
+### Solo
+
+Runs tasks in the main thread — no subprocess, no concurrency. Useful for debugging.
+
+```bash
+celery -A myapp worker --pool=solo
+```
+
+### Threads
+
+Uses Python threads instead of processes.
+
+```bash
+celery -A myapp worker --pool=threads --concurrency=16
+```
+
+Limited by the GIL for CPU work; fine for I/O.
+
+## Queues
+
+By default all tasks go to a queue named `celery`. You can define multiple queues and route tasks to specific ones:
+
+```python
+# celeryconfig.py
+task_routes = {
+    "myapp.tasks.send_email": {"queue": "emails"},
+    "myapp.tasks.encode_video": {"queue": "heavy"},
+}
+```
+
+Start workers that listen to specific queues:
+
+```bash
+# Dedicated email worker
+celery -A myapp worker -Q emails --concurrency=20
+
+# Heavy compute worker
+celery -A myapp worker -Q heavy --concurrency=4
+```
+
+Workers only pick tasks from the queues they subscribe to. This lets you allocate the right hardware to the right work.
+
+## Prefetch Multiplier
+
+The worker pre-fetches tasks from the broker before it has finished the current one. This improves throughput but can cause long tasks to hog a slot.
+
+```python
+# celeryconfig.py
+worker_prefetch_multiplier = 1  # fetch only one task at a time per worker slot
+```
+
+Setting it to `1` is recommended for long-running or heterogeneous tasks to ensure fair distribution.
+
+## Task Acknowledgment
+
+By default, a task is **acknowledged** (removed from the queue) as soon as the worker receives it, even before execution finishes. If the worker crashes mid-task, the task is lost.
+
+For reliability, use late acknowledgment:
+
+```python
+# celeryconfig.py
+task_acks_late = True
+worker_prefetch_multiplier = 1
+```
+
+With `acks_late=True`, the task stays in the queue until the worker explicitly acknowledges completion. If the worker crashes, the broker re-delivers the task.
+
+> Make sure tasks are [idempotent](/programming/celery/tasks) when using late ack — they may run more than once.
+
+## Autoscaling
+
+The worker can automatically scale the number of processes between a min and max based on load:
+
+```bash
+celery -A myapp worker --autoscale=10,2
+```
+
+This means: at least 2 processes, up to 10 when there's backlog.
+
+## Worker Signals and Lifecycle
+
+Workers emit signals you can hook into:
+
+```python
+from celery.signals import worker_ready, worker_shutdown
+
+@worker_ready.connect
+def on_ready(sender, **kwargs):
+    print("Worker is ready!")
+
+@worker_shutdown.connect
+def on_shutdown(sender, **kwargs):
+    print("Worker shutting down...")
+```
+
+Useful for warming up caches, opening DB connection pools, or flushing state on shutdown.
+
+## Graceful Shutdown
+
+Send `SIGTERM` to a worker and it finishes its current tasks before exiting:
+
+```bash
+kill -TERM <worker_pid>
+```
+
+Force-kill with `SIGKILL` (`kill -9`) only as a last resort — in-flight tasks will be re-queued if `acks_late` is on, or lost if not.
+
+## Running Multiple Workers
+
+On a single machine:
+
+```bash
+celery -A myapp worker -n worker1@%h --concurrency=4
+celery -A myapp worker -n worker2@%h -Q heavy --concurrency=2
+```
+
+`-n` sets a unique name. `%h` expands to the hostname.
+
+With **supervisord** or **systemd**, you can manage these as services so they restart automatically on failure.
+
+## Monitoring Worker Health
+
+The worker exposes a control API you can query:
+
+```bash
+# Inspect active tasks
+celery -A myapp inspect active
+
+# Ping all workers
+celery -A myapp inspect ping
+
+# See registered tasks
+celery -A myapp inspect registered
+```
+
+For a real-time dashboard, see [Flower](/programming/celery/flower).

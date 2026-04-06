@@ -1,0 +1,350 @@
+---
+title: Configuration & Best Practices
+description: Production-ready Celery configuration — serialization, security, timeouts, error handling, and deployment patterns.
+level: advanced
+---
+
+# Configuration & Best Practices
+
+A default Celery setup works fine locally. Production requires deliberate configuration for reliability, security, and observability.
+
+## Configuration File
+
+Prefer a dedicated config module over inline `app.conf`:
+
+```python
+# celery.py
+from celery import Celery
+
+app = Celery("myapp")
+app.config_from_object("myapp.celeryconfig")
+```
+
+```python
+# myapp/celeryconfig.py
+broker_url = "redis://redis:6379/0"
+result_backend = "redis://redis:6379/1"
+timezone = "UTC"
+enable_utc = True
+```
+
+Or load from Django settings with a namespace:
+
+```python
+# celery.py
+app.config_from_object("django.conf:settings", namespace="CELERY")
+```
+
+```python
+# settings.py
+CELERY_BROKER_URL = "redis://redis:6379/0"
+CELERY_RESULT_BACKEND = "redis://redis:6379/1"
+CELERY_TIMEZONE = "UTC"
+```
+
+---
+
+## Serialization
+
+Default serialization is **JSON**. JSON is safe — it won't execute arbitrary code. Avoid `pickle`.
+
+```python
+task_serializer = "json"
+result_serializer = "json"
+accept_content = ["json"]     # reject any other format
+```
+
+**Never use `pickle` as your task serializer in production.** Pickle deserializes arbitrary Python objects — a malicious message in your queue can execute code on your workers.
+
+---
+
+## Timeouts
+
+Prevent tasks from hanging indefinitely:
+
+```python
+# Soft limit: raises SoftTimeLimitExceeded — task can catch and clean up
+task_soft_time_limit = 300  # 5 minutes
+
+# Hard limit: SIGKILL — task is killed immediately
+task_time_limit = 360       # 6 minutes
+```
+
+Per-task overrides:
+
+```python
+@app.task(soft_time_limit=60, time_limit=90)
+def fetch_report():
+    ...
+```
+
+Always set both. Make the soft limit lower so the task can save state or send an alert before the hard kill.
+
+---
+
+## Late Acknowledgment and Idempotency
+
+```python
+task_acks_late = True
+worker_prefetch_multiplier = 1
+```
+
+With late ack, a task stays in the broker queue until execution completes. If the worker crashes, the task is re-delivered. This means tasks **may run more than once** — design them to be [idempotent](/programming/celery/tasks).
+
+---
+
+## Result Expiration
+
+Don't let old results pile up:
+
+```python
+result_expires = 86400  # 24 hours (default)
+```
+
+For fire-and-forget tasks, disable result storage entirely:
+
+```python
+task_ignore_result = True
+```
+
+---
+
+## Queue Configuration
+
+Explicit queues and routing prevent tasks from competing for the same worker pool:
+
+```python
+from kombu import Queue, Exchange
+
+task_queues = [
+    Queue("default", Exchange("default"), routing_key="default"),
+    Queue("emails",  Exchange("emails"),  routing_key="emails"),
+    Queue("heavy",   Exchange("heavy"),   routing_key="heavy"),
+]
+
+task_default_queue = "default"
+
+task_routes = {
+    "myapp.tasks.send_email":   {"queue": "emails"},
+    "myapp.tasks.encode_video": {"queue": "heavy"},
+}
+```
+
+Start dedicated workers per queue:
+
+```bash
+celery -A myapp worker -Q emails --concurrency=20
+celery -A myapp worker -Q heavy --concurrency=4
+celery -A myapp worker -Q default --concurrency=8
+```
+
+---
+
+## Retry Configuration
+
+Global retry defaults:
+
+```python
+task_max_retries = 3
+task_default_retry_delay = 60   # seconds
+```
+
+For per-task exponential backoff with jitter:
+
+```python
+@app.task(
+    autoretry_for=(Exception,),
+    max_retries=5,
+    retry_backoff=True,
+    retry_backoff_max=600,
+    retry_jitter=True,
+)
+def unreliable_task():
+    ...
+```
+
+---
+
+## Broker Connection Resilience
+
+```python
+broker_connection_retry_on_startup = True
+broker_connection_max_retries = 10
+broker_heartbeat = 10               # detect dead connections
+broker_pool_limit = 10
+```
+
+For Redis, enable `socket_keepalive`:
+
+```python
+broker_transport_options = {
+    "socket_keepalive": True,
+    "socket_keepalive_options": {
+        "TCP_KEEPIDLE": 60,
+        "TCP_KEEPCNT": 3,
+        "TCP_KEEPINTVL": 10,
+    },
+    "visibility_timeout": 43200,    # 12 hours — match your longest task
+}
+```
+
+`visibility_timeout` for Redis: if a task takes longer than this, Redis considers it lost and re-delivers it. Set it higher than your longest expected task duration.
+
+---
+
+## Signals for Cross-Cutting Concerns
+
+Hook into Celery's lifecycle signals for logging, tracing, and alerting without polluting every task:
+
+```python
+from celery.signals import (
+    task_prerun, task_postrun, task_failure, task_retry,
+    worker_ready, worker_shutdown,
+)
+
+@task_failure.connect
+def on_task_failure(sender, task_id, exception, traceback, einfo, **kwargs):
+    # Send to Sentry, PagerDuty, etc.
+    sentry_sdk.capture_exception(exception)
+
+@task_prerun.connect
+def on_task_start(sender, task_id, task, args, kwargs, **kwargs_):
+    # Start a span in your APM tool
+    pass
+
+@worker_ready.connect
+def on_worker_ready(sender, **kwargs):
+    logger.info("Worker %s is ready", sender)
+```
+
+---
+
+## Django Integration
+
+```python
+# myapp/celery.py
+import os
+from celery import Celery
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "myapp.settings")
+
+app = Celery("myapp")
+app.config_from_object("django.conf:settings", namespace="CELERY")
+app.autodiscover_tasks()  # finds tasks.py in each INSTALLED_APP
+```
+
+```python
+# myapp/__init__.py
+from .celery import app as celery_app
+__all__ = ("celery_app",)
+```
+
+`autodiscover_tasks()` automatically imports `tasks.py` from every installed Django app.
+
+---
+
+## Production Deployment
+
+### systemd Service (Worker)
+
+```ini
+# /etc/systemd/system/celery-worker.service
+[Unit]
+Description=Celery Worker
+After=network.target
+
+[Service]
+User=celery
+Group=celery
+WorkingDirectory=/srv/myapp
+ExecStart=/srv/myapp/venv/bin/celery -A myapp worker \
+    --loglevel=info \
+    --concurrency=8 \
+    --max-tasks-per-child=1000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`--max-tasks-per-child` recycles worker processes after N tasks — prevents memory leaks.
+
+### systemd Service (Beat)
+
+```ini
+# /etc/systemd/system/celery-beat.service
+[Unit]
+Description=Celery Beat Scheduler
+After=network.target
+
+[Service]
+User=celery
+WorkingDirectory=/srv/myapp
+ExecStart=/srv/myapp/venv/bin/celery -A myapp beat \
+    --loglevel=info \
+    --scheduler django_celery_beat.schedulers:DatabaseScheduler
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Docker Compose
+
+```yaml
+version: "3.9"
+services:
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  worker:
+    build: .
+    command: celery -A myapp worker --loglevel=info --concurrency=8
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  beat:
+    build: .
+    command: celery -A myapp beat --loglevel=info
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  flower:
+    build: .
+    command: celery -A myapp flower --port=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+
+volumes:
+  redis_data:
+```
+
+---
+
+## Checklist for Production
+
+- [ ] JSON serializer with `accept_content = ["json"]`
+- [ ] `task_acks_late = True` + `worker_prefetch_multiplier = 1`
+- [ ] `task_soft_time_limit` and `task_time_limit` set on every task
+- [ ] `result_expires` configured, or `task_ignore_result = True` for fire-and-forget
+- [ ] Explicit queues with dedicated workers per queue type
+- [ ] `broker_connection_retry_on_startup = True`
+- [ ] `visibility_timeout` > your longest task duration (Redis)
+- [ ] Single Beat process running as a managed service
+- [ ] [Flower](/programming/celery/flower) with authentication deployed
+- [ ] Error tracking (Sentry) hooked via `task_failure` signal
+- [ ] `timezone` set explicitly
+- [ ] Workers run with `--max-tasks-per-child` to prevent memory leaks

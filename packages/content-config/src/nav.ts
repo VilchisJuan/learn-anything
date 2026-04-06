@@ -73,6 +73,23 @@ export const NAV_AREAS: NavArea[] = [
         ],
       },
       {
+        id: "celery",
+        label: "Celery",
+        level: "intermediate",
+        description: "Distributed task queues — workers, beat scheduler, brokers, result backends, and workflow primitives.",
+        subtopics: [
+          { id: "introduction", label: "What is Celery?", level: "beginner" },
+          { id: "worker", label: "Celery Worker", level: "intermediate" },
+          { id: "beat", label: "Celery Beat", level: "intermediate" },
+          { id: "tasks", label: "Tasks & Signatures", level: "intermediate" },
+          { id: "brokers", label: "Brokers", level: "intermediate" },
+          { id: "results", label: "Result Backends", level: "intermediate" },
+          { id: "canvas", label: "Canvas — Chains, Groups & Chords", level: "advanced" },
+          { id: "flower", label: "Flower — Monitoring", level: "intermediate" },
+          { id: "configuration", label: "Configuration & Best Practices", level: "advanced" },
+        ],
+      },
+      {
         id: "regex",
         label: "Regular Expressions",
         level: "beginner",
