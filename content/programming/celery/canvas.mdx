@@ -1,6 +1,6 @@
 ---
 title: Canvas — Chains, Groups & Chords
-description: Compose complex task workflows using Celery Canvas primitives — chain, group, chord, and map.
+description: Understand how to compose tasks into workflows without blocking — the logic behind chains, groups, and chords.
 level: advanced
 area: programming
 topic: celery
@@ -8,233 +8,147 @@ topic: celery
 
 # Canvas — Chains, Groups & Chords
 
-**Celery Canvas** is a mini-language for composing tasks into workflows. Instead of manually chaining `result.get()` calls (which blocks workers), Canvas primitives run tasks asynchronously and pass results forward automatically.
+Canvas is Celery's system for composing multiple tasks into workflows. Instead of writing orchestration logic in your application (which would require blocking and waiting), Canvas lets you declare *how* tasks should relate to each other and then hand the whole workflow to Celery to execute asynchronously.
 
-## Prerequisites
+## Why Orchestration Is Tricky
 
-Canvas requires a [result backend](/programming/celery/results) configured, because intermediate results must be stored between steps.
+The naive approach to a multi-step pipeline looks like this:
 
----
-
-## Signature Recap
-
-Before composing, you need **signatures** — serializable task descriptors:
-
-```python
-from myapp.tasks import add, multiply
-
-s1 = add.s(2, 3)        # add(2, 3)
-s2 = multiply.s(10)     # multiply(<input>, 10) — partial, awaits input
+```
+result1 = step1.delay(data)
+result2 = step2.delay(result1.get())   ← blocks here waiting
+result3 = step3.delay(result2.get())   ← blocks here too
 ```
 
-`.s()` creates a mutable signature; `.si()` creates an **immutable** one (ignores piped input).
+This works, but it's terrible:
+- The application blocks on each `.get()`, defeating the purpose of async
+- If this code runs inside a task, it holds a worker slot hostage while waiting
+- It leads to the deadlock scenario described in the results lesson
 
----
+Canvas solves this by letting you **describe the pipeline** before any task runs, and then executing it without blocking.
 
-## `chain` — Sequential Pipeline
+## The Core Idea: Callbacks
 
-A chain runs tasks one after another, passing each task's result as the first argument to the next.
+Celery's workflow system is built on callbacks. Instead of "run step 1, then step 2," you say "run step 1, and when it finishes, automatically enqueue step 2 with step 1's result."
 
-```python
-from celery import chain
+No process is blocking. When step 1 finishes, the worker looks at its callback list, enqueues step 2, and moves on to other work. Step 2 runs when a worker is available.
 
-# fetch(url) → parse(html) → store(data)
-workflow = chain(
-    fetch.s("https://api.example.com/data"),
-    parse.s(),
-    store.s(),
-)
-
-result = workflow.delay()
+```
+Worker runs step1
+  → step1 completes → result = 42
+  → worker sees: "when done, enqueue step2 with 42"
+  → worker enqueues step2(42)
+  → worker moves on
+Another worker (or same) runs step2(42)
 ```
 
-Pipe syntax (equivalent):
+## Chain — Sequential Steps
 
-```python
-workflow = fetch.s("https://api.example.com/data") | parse.s() | store.s()
+A chain is a linear pipeline where each task's output becomes the next task's input.
+
+```
+fetch → parse → store
+  ↓result→  ↓result→
 ```
 
-**How it works:** After `fetch` completes, Celery automatically calls `parse(fetch_result)`. After `parse`, it calls `store(parse_result)`. No worker blocks waiting.
+The chain is declared all at once. No task runs until you launch the chain. When you do, only the first task is enqueued immediately. Each subsequent task is a callback that fires after the previous one completes.
 
-### Immutable Steps in a Chain
+**Mental model:** A relay race. Each runner (task) gets the baton (result) from the previous runner and carries it forward to the next.
 
-Use `.si()` when a step shouldn't receive the previous result:
+**Immutable steps:** Sometimes a task in the chain shouldn't receive the previous result — it's a side effect, not a data transformation. An immutable step ignores the incoming result and only uses the arguments you baked into it.
 
-```python
-# Notify regardless of what add() returned
-workflow = add.s(2, 3) | notify_team.si("Task complete!")
+```
+add → multiply → send_notification
+  ↓result→  ↓result→  ✗ (notification doesn't need the number)
 ```
 
----
+## Group — Parallel Execution
 
-## `group` — Parallel Execution
+A group runs multiple tasks simultaneously. All tasks start at once. When all have finished, you get a list of all their results.
 
-A group runs multiple tasks **simultaneously** and collects all results.
-
-```python
-from celery import group
-
-job = group(
-    add.s(1, 1),
-    add.s(2, 2),
-    add.s(3, 3),
-)
-
-result = job.delay()
-print(result.get())  # [2, 4, 6]
+```
+         ┌── fetch(url1) ──┐
+launch ──┤── fetch(url2) ──├── all done → [result1, result2, result3]
+         └── fetch(url3) ──┘
 ```
 
-All tasks in the group start immediately and run in parallel (across available workers). `result.get()` waits for all of them.
+The group is ideal when you have independent work that doesn't depend on each other's results. Parallel execution reduces total time from (sum of all durations) to (longest single duration).
 
-### Dynamic Groups
+**Example:** fetching 10 URLs. Sequentially: 10 × 2s = 20s. In a group with 10 workers: ~2s total.
 
-```python
-urls = ["https://site1.com", "https://site2.com", "https://site3.com"]
-job = group(fetch.s(url) for url in urls)
-result = job.delay()
+**Mental model:** Sending the same question to 10 experts simultaneously and collecting all their answers, rather than asking them one by one.
+
+## Chord — Parallel + Callback
+
+A chord is a group with a callback. All the parallel tasks run, and when the *last one finishes*, a final callback task runs with the collected results as input.
+
+```
+         ┌── process(item1) ──┐
+launch ──┤── process(item2) ──├──► aggregate(all_results)
+         └── process(item3) ──┘
 ```
 
----
+This is the **map-reduce pattern**: map a function over many inputs in parallel, then reduce all results into one.
 
-## `chord` — Parallel + Callback
+**How does Celery know when "all" have finished?** The result backend tracks it. Each task in the header group, as it completes, checks in with the backend. A counter decrements. When it hits zero, the callback is enqueued. This is why chords require a result backend.
 
-A chord = **group** + **callback**. The callback runs after all parallel tasks finish, receiving their results as a list.
-
-```python
-from celery import chord
-
-result = chord(
-    group(add.s(i, i) for i in range(5)),   # header: 5 parallel tasks
-)(aggregate.s())                            # callback: runs when all done
-
-print(result.get())  # aggregate([0, 2, 4, 6, 8])
-```
-
-**Use case:** Scrape 100 URLs in parallel → combine all results into one report.
-
-```python
-from celery import chord, group
-
-pipeline = chord(
-    group(scrape.s(url) for url in url_list),
-)(generate_report.s())
-```
-
-### Chord Internals
-
-Celery uses the result backend to track how many tasks in the group have completed. When the last one finishes, it automatically enqueues the callback. This is why a result backend is **required** for chords.
-
-### Error Handling in Chords
-
-If any task in the chord header fails, the callback won't fire by default. Use `link_error`:
-
-```python
-chord(header)(callback.s()).on_error(handle_error.s())
-```
-
----
-
-## `chunks` — Batch Processing
-
-Split a large list into chunks, each processed as a separate task:
-
-```python
-result = add.chunks(zip(range(100), range(100)), 10).apply_async()
-# Creates 10 tasks, each processing 10 pairs
-```
-
----
-
-## `map` and `starmap`
-
-Apply a task to each item in a list:
-
-```python
-from celery import xmap, xstarmap
-
-# map: single arg per item
-result = add.map([1, 2, 3, 4]).delay()
-
-# starmap: unpack tuples as args
-result = add.starmap([(1, 1), (2, 2), (3, 3)]).delay()
-```
-
-These run as a **single task** that iterates internally — no parallelism, but very low overhead for many small items.
-
----
+**Mental model:** You send questionnaires to 100 customers (the group). When the last response comes in, you run a statistical analysis on all responses (the callback). You couldn't run the analysis until every questionnaire was returned.
 
 ## Combining Primitives
 
-Canvas primitives compose:
+Chains, groups, and chords can be nested and combined to express complex workflows.
 
-```python
-# 1. Fetch 3 sources in parallel
-# 2. Merge them
-# 3. Then summarize and notify in sequence
-pipeline = (
-    chord(
-        group(fetch.s(src) for src in sources),
-    )(merge.s())
-    | summarize.s()
-    | notify.si("Done!")
-)
-
-pipeline.delay()
+**Fan-out, then aggregate:**
+```
+fetch all URLs in parallel (group)
+  → combine into one document (callback)
 ```
 
----
-
-## Workflow Patterns
-
-### Fan-Out → Fan-In
-
+**Pipeline of parallel stages:**
 ```
-         ┌── task_A ──┐
-start ───┤── task_B ──├──► aggregate
-         └── task_C ──┘
+Stage 1: download 100 files (group)
+  → Stage 2: parse each file (chord callback that spawns new group)
+  → Stage 3: merge all parsed data (final callback)
 ```
 
-```python
-chord(group(task_A.s(), task_B.s(), task_C.s()))(aggregate.s())
+**Mixed:**
+```
+step1 → [step2a + step2b + step2c in parallel] → step3
+  chain(step1, chord(group(...), step3))
 ```
 
-### Sequential Pipeline
+The composition model is the same building blocks repeated at different scales.
 
-```
-step1 ──► step2 ──► step3
-```
+## The Key Insight: No Blocking
 
-```python
-chain(step1.s(), step2.s(), step3.s())
-```
+The entire point of Canvas is that nothing blocks. Here's the contrast:
 
-### Map-Reduce
-
+**Without Canvas:**
 ```
-         ┌── map(item1) ──┐
-input ───┤── map(item2) ──├──► reduce
-         └── map(item3) ──┘
+task1 runs → app waits → task2 runs → app waits → task3 runs
 ```
 
-```python
-chord(group(process.s(item) for item in items))(reduce_results.s())
+**With Canvas:**
+```
+app declares: task1 → task2 → task3
+app enqueues and moves on (no waiting)
+task1 runs on worker → triggers task2 → triggers task3
 ```
 
----
+Worker slots are never held idle waiting for other tasks. The callback mechanism means each step is enqueued only when its dependencies are ready, and the enqueuing is done by Celery infrastructure, not by a blocking application thread.
 
-## Debugging Canvas Workflows
+## Signatures as the Building Block
 
-```python
-# Inspect the serialized workflow before running it
-import json
-workflow = chain(add.s(1, 2), multiply.s(3))
-print(json.dumps(workflow, indent=2, default=str))
+Every Canvas primitive is built from **signatures** — serializable descriptions of task calls. A chain is a list of signatures. A group is a set of signatures. A chord is a group of signatures plus one callback signature.
 
-# Run synchronously for debugging (no workers needed)
-workflow.apply()
-```
+Because signatures are just data (JSON), they can be passed around, stored, and inspected before execution. This is what makes it possible to describe the entire workflow upfront and hand it off to Celery.
 
-Common issues:
-- **Chord never fires callback** — result backend not configured or a header task failed silently
-- **Chain receives unexpected input** — forgot to use `.si()` for an immutable step
-- **Deadlock** — calling `result.get()` inside a task that's part of a chord
+## When to Use Canvas
+
+**Use a chain** when steps must happen in order and each step depends on the previous result.
+
+**Use a group** when steps are independent and can run in parallel.
+
+**Use a chord** when you need to fan out work across many tasks and then aggregate the results.
+
+**Don't use Canvas** for simple single-task operations — it adds unnecessary complexity. Canvas is for multi-step workflows where the relationship between tasks matters.

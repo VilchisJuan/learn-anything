@@ -1,6 +1,6 @@
 ---
 title: Tasks & Signatures
-description: Define, call, retry, and compose Celery tasks using signatures and calling conventions.
+description: Understand what a Celery task is, how calling works, retries, and the concept of signatures.
 level: intermediate
 area: programming
 topic: celery
@@ -8,214 +8,161 @@ topic: celery
 
 # Tasks & Signatures
 
-A **task** is a Python function registered with Celery that can be executed asynchronously by a [worker](/programming/celery/worker). A **signature** is a serializable description of a task call — the function plus its arguments — that can be passed around and executed later.
+A task is the fundamental unit of work in Celery. Understanding what a task really is — and how calling one differs from a normal function call — is central to using Celery correctly.
 
-## Defining a Task
+## What a Task Is
 
-```python
-from celery import Celery
+A task is a Python function that has been **registered** with Celery. Registering it gives Celery two things:
 
-app = Celery("myapp", broker="redis://localhost:6379/0")
+1. A **name** — a unique string identifier (usually the module path + function name). This name is what gets put into the broker message, not the actual code.
+2. A **callable** that workers know to look up by that name when they receive a message.
 
-@app.task
-def send_email(to: str, subject: str, body: str) -> bool:
-    # ... email sending logic ...
-    return True
+The message that travels through the broker is just a small piece of JSON: the task name, the arguments, and some metadata. The actual code lives in the worker's Python environment.
+
+```
+Broker message:
+{
+  "task": "myapp.tasks.send_email",
+  "args": ["alice@example.com"],
+  "kwargs": {"subject": "Hello"},
+  "id": "abc-123-uuid"
+}
 ```
 
-The `@app.task` decorator registers the function with Celery. The task's name defaults to `"myapp.tasks.send_email"`.
+The worker sees this, looks up `myapp.tasks.send_email` in its registry, and calls it with those arguments.
 
-### Custom Task Name
+## Three Ways to Call a Task
 
-```python
-@app.task(name="notifications.send_email")
-def send_email(to, subject, body):
-    ...
+### 1. Calling it normally (synchronous)
+
+You call the function like any Python function. It runs immediately in the current process. No broker involved. This is useful for testing.
+
+### 2. `.delay()` — fire and forget
+
+This sends the task to the broker and returns immediately. The actual execution happens in a worker, asynchronously. You get back a handle (an `AsyncResult`) but you don't have to use it.
+
+The handle contains a task ID. If you care about the result, you can use this ID to retrieve it later.
+
+### 3. `.apply_async()` — fire with options
+
+Same as `.delay()` but gives you control over *when* the task runs, which queue it goes to, when it expires, and more.
+
+You can say: "run this task in 5 minutes" or "put this task in the high-priority queue" or "discard this task if it hasn't started within an hour."
+
+## The AsyncResult Handle
+
+When you call a task asynchronously, you immediately get back a handle — think of it like a claim ticket at a coat check. You hand over your coat (the task), get a ticket (the AsyncResult), and can come back later to retrieve it.
+
+The handle lets you ask:
+- Has this task finished yet?
+- Did it succeed or fail?
+- What did it return?
+
+You ask these questions by checking the **result backend** — the store where workers write their output. Without a result backend, the handle is effectively useless.
+
+```
+App → broker → worker runs task → writes result to backend
+                                           ↑
+App → uses handle → queries backend → gets result
 ```
 
-Stable names matter if you rename or move files — old tasks in the queue still reference the original name.
+## Task States
 
-## Calling Tasks
+Every task goes through states:
 
-### `delay()` — Simple Async Call
-
-```python
-send_email.delay("alice@example.com", "Hello", "Hi Alice!")
+```
+PENDING → STARTED → SUCCESS
+                  ↘ FAILURE
+                  ↘ RETRY
 ```
 
-The task is immediately enqueued. Your code continues without waiting.
+**PENDING** — the task has been sent but no worker has started it yet (or the ID is unknown).
 
-### `apply_async()` — Full Control
+**STARTED** — a worker picked it up and is running it (only tracked if you enable this explicitly).
 
-```python
-send_email.apply_async(
-    args=["alice@example.com"],
-    kwargs={"subject": "Hello", "body": "Hi Alice!"},
-    countdown=60,            # run in 60 seconds
-    expires=3600,            # discard if not run within 1 hour
-    queue="emails",          # send to a specific queue
-    priority=5,              # broker-level priority (RabbitMQ)
-    retry=True,
-)
+**SUCCESS** — completed without error. Result is stored.
+
+**FAILURE** — raised an exception. The exception is stored.
+
+**RETRY** — the task failed and is being re-queued to try again.
+
+**REVOKED** — the task was cancelled before or during execution.
+
+## Retries — The Logic
+
+Tasks fail. Networks time out. External APIs go down. Retries let you handle transient failures gracefully without losing work.
+
+The retry logic works like this:
+
+1. Task runs and raises an exception.
+2. Instead of failing permanently, the task re-enqueues itself with a delay.
+3. After the delay, a worker picks it up and tries again.
+4. This repeats up to a maximum number of attempts.
+5. If all attempts fail, the task enters FAILURE state permanently.
+
+**Exponential backoff** is the standard retry strategy: wait 1 second, then 2, then 4, then 8... This prevents hammering a struggling external service with rapid retries.
+
+**Jitter** adds randomness to the delay. Without jitter, if 1000 tasks all fail at the same moment, they all retry at the same moment — creating a thundering herd. Jitter spreads them out.
+
+```
+Without jitter:  all 1000 tasks retry at t=30s → spike
+With jitter:     tasks retry between t=25s and t=35s → spread
 ```
 
-### `apply()` — Synchronous (Blocking)
+## Idempotency — The Most Important Design Principle
 
-Runs the task in the current process. Useful in tests.
+With retries and at-least-once delivery, a task may run more than once. This makes **idempotency** essential.
 
-```python
-result = send_email.apply(args=["alice@example.com", "Hi", "Body"])
-print(result.get())  # True
+An idempotent task produces the same result whether it runs once or ten times.
+
+**Non-idempotent (dangerous):**
+```
+Create a database row with this data
+→ runs twice → two duplicate rows
 ```
 
-## AsyncResult — Tracking Task State
-
-```python
-result = send_email.delay("alice@example.com", "Hi", "Body")
-
-print(result.id)        # unique task ID (UUID)
-print(result.status)    # PENDING, STARTED, SUCCESS, FAILURE, RETRY, REVOKED
-print(result.ready())   # True if done
-print(result.successful())  # True if SUCCESS
-print(result.get(timeout=10))  # block and return value (or raise on failure)
+**Idempotent (safe):**
+```
+Create a database row IF one doesn't already exist with this key
+→ runs twice → still one row
 ```
 
-States:
-- `PENDING` — task not yet started (or unknown ID)
-- `STARTED` — worker picked it up (requires `task_track_started = True`)
-- `SUCCESS` — completed successfully
-- `FAILURE` — raised an exception
-- `RETRY` — being retried
-- `REVOKED` — cancelled
+The pattern is always: check before acting, or use upserts, or design the operation so repetition has no harmful side effect.
 
-## Retries
+## Signatures — Describing a Call Without Making It
 
-Tasks can automatically retry on failure:
+A **signature** is a serializable description of a task call. It captures:
+- Which task to call
+- What arguments to pass
 
-```python
-@app.task(bind=True, max_retries=3, default_retry_delay=60)
-def fetch_data(self, url: str):
-    try:
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as exc:
-        raise self.retry(exc=exc, countdown=2 ** self.request.retries)
-```
+But it doesn't execute the task immediately. It's a recipe you can pass around, store, or execute later.
 
-- `bind=True` — passes `self` (the task instance) so you can call `self.retry()`
-- `max_retries=3` — give up after 3 retries
-- `countdown=2 ** self.request.retries` — exponential backoff: 1s, 2s, 4s, …
+Think of it like the difference between *eating a sandwich* and *writing down the recipe for a sandwich*. A signature is the recipe.
 
-### Retrying with `autoretry_for`
+Signatures become essential for workflow composition — you build a pipeline by connecting signatures together, and Celery executes them in the right order with results flowing between steps.
 
-```python
-@app.task(
-    autoretry_for=(requests.Timeout, requests.ConnectionError),
-    max_retries=5,
-    retry_backoff=True,       # exponential backoff
-    retry_backoff_max=600,    # cap at 10 minutes
-    retry_jitter=True,        # add randomness to avoid thundering herd
-)
-def fetch_data(url: str):
-    return requests.get(url, timeout=5).json()
-```
+There are two flavors:
 
-## Task Options via Decorator
+**Mutable signature** — when this task runs as part of a pipeline, it receives the result of the previous step as its first argument.
 
-```python
-@app.task(
-    name="myapp.send_email",
-    max_retries=3,
-    default_retry_delay=30,
-    soft_time_limit=120,   # raises SoftTimeLimitExceeded after 120s
-    time_limit=180,        # hard kill after 180s
-    acks_late=True,        # acknowledge only after execution
-    ignore_result=True,    # don't store result in backend
-)
-def send_email(to, subject, body):
-    ...
-```
+**Immutable signature** — this task ignores whatever the previous step returned. It only uses the arguments baked into the signature.
 
-## Signatures
-
-A **signature** wraps a task call into a reusable, composable object:
-
-```python
-from myapp.tasks import add
-
-sig = add.s(4, 6)           # positional args
-sig = add.si(4, 6)          # immutable — ignores input from previous task in chain
-sig = add.s(x=4, y=6)      # keyword args
-
-sig.delay()                 # enqueue it
-sig.apply_async(countdown=10)
-```
-
-Signatures are JSON-serializable, so they can be passed to [Canvas](/programming/celery/canvas) primitives like chains and groups.
-
-### Partial Signatures
-
-```python
-# Provide some args now, more later
-partial_sig = add.s(4)  # one arg pending
-partial_sig.delay(6)    # adds 6 → add(4, 6)
-```
-
-## Task Context (`request`)
-
-Inside a task, `self.request` gives you runtime metadata (when `bind=True`):
-
-```python
-@app.task(bind=True)
-def my_task(self):
-    print(self.request.id)          # task UUID
-    print(self.request.retries)     # retry count
-    print(self.request.queue)       # which queue
-    print(self.request.eta)         # scheduled ETA
-    print(self.request.callbacks)   # downstream callbacks
-```
-
-## Idempotency
-
-A task is **idempotent** if running it multiple times produces the same result as running it once. Always design tasks to be idempotent — retries and at-least-once delivery guarantees mean your task *will* occasionally run more than once.
-
-```python
-# NOT idempotent — duplicates rows on retry
-@app.task
-def create_user(email):
-    User.objects.create(email=email)
-
-# Idempotent — safe to retry
-@app.task
-def create_user(email):
-    User.objects.get_or_create(email=email)
-```
-
-## Hooks: `on_success`, `on_failure`, `on_retry`
-
-```python
-@app.task(bind=True)
-def process(self, data):
-    ...
-
-    def on_success(self, retval, task_id, args, kwargs):
-        notify_success(task_id)
-
-    def on_failure(self, exc, task_id, args, kwargs, einfo):
-        alert_team(exc)
-```
-
-Or use **signals** for app-wide hooks (see [Configuration](/programming/celery/configuration)).
+This distinction matters in chained workflows: sometimes you want to pass data forward, sometimes you want an independent side effect (like sending a notification) that doesn't depend on the previous result.
 
 ## Revoking Tasks
 
-Cancel a queued (not yet started) task:
+You can cancel a task that's waiting in the queue. If it hasn't been picked up yet, it won't run.
 
-```python
-result = process.delay(data)
-result.revoke()                 # cancel if not started
-result.revoke(terminate=True)   # kill even if running
-```
+If a task is already running, you can send a termination signal to the worker running it. This is a more aggressive operation and the worker may not respond immediately.
 
-Revoked task IDs are stored in-memory by default — workers forget them on restart. Use a persistent revoke store for durability.
+Revocation is useful for user-initiated cancellations: "I submitted a report generation but I changed my mind."
+
+## Soft and Hard Time Limits
+
+Tasks can have time limits — to prevent runaway tasks from blocking a worker slot indefinitely.
+
+**Soft limit** — after N seconds, the task receives a signal (an exception). It can catch this, clean up, and exit gracefully.
+
+**Hard limit** — after N seconds, the worker kills the task process unconditionally. No cleanup possible.
+
+The typical pattern: set the soft limit slightly lower than the hard limit. Give the task a chance to clean up on soft, then force-kill on hard.

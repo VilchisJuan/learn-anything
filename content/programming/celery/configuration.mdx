@@ -1,6 +1,6 @@
 ---
 title: Configuration & Best Practices
-description: Production-ready Celery configuration — serialization, security, timeouts, error handling, and deployment patterns.
+description: Understand the key decisions behind a production Celery setup — what each setting does and why it matters.
 level: advanced
 area: programming
 topic: celery
@@ -8,345 +8,134 @@ topic: celery
 
 # Configuration & Best Practices
 
-A default Celery setup works fine locally. Production requires deliberate configuration for reliability, security, and observability.
+Getting Celery running locally takes minutes. Getting it right in production requires deliberate choices about reliability, security, and resource management. This lesson explains the *why* behind those choices.
 
-## Configuration File
+## Serialization: Why JSON and Not Pickle
 
-Prefer a dedicated config module over inline `app.conf`:
+When a task is enqueued, its arguments must be serialized into a format that can travel through the broker. Celery supports several formats, but the choice matters enormously for security.
 
-```python
-# celery.py
-from celery import Celery
+**Pickle** is Python's native serialization format. It can represent almost any Python object. It's convenient — you can pass complex objects as task arguments without thinking about it.
 
-app = Celery("myapp")
-app.config_from_object("myapp.celeryconfig")
+The problem: **pickle is executable**. When a worker deserializes a pickle payload, it executes Python code embedded in the payload. If anyone can write to your broker (or intercept messages), they can execute arbitrary code on your workers.
+
+**JSON** can only represent simple data types — strings, numbers, lists, dictionaries. It cannot execute code. A malicious JSON payload is just malformed data, not a code injection.
+
+The rule: always use JSON. If you need to pass complex objects, serialize them to simple types first (pass an ID and look up the object inside the task, rather than passing the object itself).
+
+## Acknowledgment and Idempotency — The Reliability Contract
+
+There is a fundamental tension in distributed systems between **performance** and **reliability**:
+
+- Acknowledge immediately → faster, but tasks can be lost if the worker crashes during execution
+- Acknowledge after completion (late ack) → slower, but tasks survive worker crashes
+
+Late acknowledgment gives you the stronger guarantee: work is never silently lost. But it introduces a new requirement: tasks must be idempotent. Because with late ack, a task *will* run more than once in failure scenarios.
+
+These two settings go together. Enabling late ack without designing idempotent tasks just trades one problem (data loss) for another (duplicate processing).
+
+The prefetch multiplier should also be set to 1 alongside late ack. With late ack, a task stays in the "unacknowledged" state on the broker until it finishes. If a worker has prefetched many tasks and crashes, all those prefetched tasks are re-delivered. Prefetching one at a time limits the blast radius.
+
+## Time Limits — Preventing Runaway Tasks
+
+Without time limits, a task that gets stuck (infinite loop, deadlocked external call, network hung) holds a worker slot forever. With 8 slots and 8 stuck tasks, your entire worker is frozen.
+
+Time limits are the circuit breaker:
+
+**Soft limit** — sends an exception to the running task after N seconds. The task can catch this, log the timeout, clean up open resources, and exit cleanly.
+
+**Hard limit** — kills the task process after N seconds, unconditionally. No cleanup possible.
+
+The right pattern is: soft limit slightly lower than the hard limit. The soft limit gives the task a window to handle the timeout gracefully. The hard limit is the guarantee that the slot will eventually be freed no matter what.
+
+Every task should have a time limit. The appropriate value depends on the task — an email send might have a 30-second limit, while a video encoding task might have a 2-hour limit.
+
+## Queue Design — Isolation by Work Type
+
+All tasks sharing one queue creates a problem called **head-of-line blocking**: a slow task blocks all the fast tasks behind it.
+
+```
+Queue: [10-min video encode][email][email][email][email]
+All 4 worker slots busy encoding → emails wait 10 minutes
 ```
 
-```python
-# myapp/celeryconfig.py
-broker_url = "redis://redis:6379/0"
-result_backend = "redis://redis:6379/1"
-timezone = "UTC"
-enable_utc = True
+Separate queues with dedicated worker pools solve this:
+
+```
+"heavy" queue  → 2 workers (prefork, for CPU work)
+"emails" queue → 20 workers (gevent, for I/O work)
+"default" queue → 8 workers (general use)
 ```
 
-Or load from Django settings with a namespace:
+Fast tasks never wait behind slow ones. Each queue can use the concurrency model that fits its workload. Each can be scaled independently.
 
-```python
-# celery.py
-app.config_from_object("django.conf:settings", namespace="CELERY")
-```
+As a rule of thumb: if two types of tasks have dramatically different durations, resource requirements, or failure modes, they should be in separate queues.
 
-```python
-# settings.py
-CELERY_BROKER_URL = "redis://redis:6379/0"
-CELERY_RESULT_BACKEND = "redis://redis:6379/1"
-CELERY_TIMEZONE = "UTC"
-```
+## Visibility Timeout — A Redis-Specific Gotcha
 
----
+When using Redis as a broker, there's a hidden footgun: the **visibility timeout**.
 
-## Serialization
+When a worker picks up a task, Redis starts a timer. If the task isn't acknowledged before the timer expires, Redis assumes the worker died and re-delivers the task to another worker.
 
-Default serialization is **JSON**. JSON is safe — it won't execute arbitrary code. Avoid `pickle`.
+If your task runs longer than the visibility timeout, it gets re-delivered — and now two workers are running the same task simultaneously.
 
-```python
-task_serializer = "json"
-result_serializer = "json"
-accept_content = ["json"]     # reject any other format
-```
+The fix is simple: set the visibility timeout higher than the longest task you ever expect to run. If your slowest task takes 4 hours, set the timeout to 5+ hours.
 
-**Never use `pickle` as your task serializer in production.** Pickle deserializes arbitrary Python objects — a malicious message in your queue can execute code on your workers.
+## Result Expiration — Avoiding Unbounded Growth
 
----
+Every completed task writes a record to the result backend. Without expiration, these records accumulate indefinitely.
 
-## Timeouts
+For a system processing 1000 tasks per hour, that's 24,000 records per day, 720,000 per month — all just sitting there, most of them never queried again after the first few seconds.
 
-Prevent tasks from hanging indefinitely:
+Set an expiration window that reflects your actual query patterns. If your app checks task status within the first minute, a few hours of retention is generous. Results older than your expiration window are automatically cleaned up.
 
-```python
-# Soft limit: raises SoftTimeLimitExceeded — task can catch and clean up
-task_soft_time_limit = 300  # 5 minutes
-
-# Hard limit: SIGKILL — task is killed immediately
-task_time_limit = 360       # 6 minutes
-```
-
-Per-task overrides:
-
-```python
-@app.task(soft_time_limit=60, time_limit=90)
-def fetch_report():
-    ...
-```
-
-Always set both. Make the soft limit lower so the task can save state or send an alert before the hard kill.
-
----
-
-## Late Acknowledgment and Idempotency
-
-```python
-task_acks_late = True
-worker_prefetch_multiplier = 1
-```
-
-With late ack, a task stays in the broker queue until execution completes. If the worker crashes, the task is re-delivered. This means tasks **may run more than once** — design them to be [idempotent](/programming/celery/tasks).
-
----
-
-## Result Expiration
-
-Don't let old results pile up:
-
-```python
-result_expires = 86400  # 24 hours (default)
-```
-
-For fire-and-forget tasks, disable result storage entirely:
-
-```python
-task_ignore_result = True
-```
-
----
-
-## Queue Configuration
-
-Explicit queues and routing prevent tasks from competing for the same worker pool:
-
-```python
-from kombu import Queue, Exchange
-
-task_queues = [
-    Queue("default", Exchange("default"), routing_key="default"),
-    Queue("emails",  Exchange("emails"),  routing_key="emails"),
-    Queue("heavy",   Exchange("heavy"),   routing_key="heavy"),
-]
-
-task_default_queue = "default"
-
-task_routes = {
-    "myapp.tasks.send_email":   {"queue": "emails"},
-    "myapp.tasks.encode_video": {"queue": "heavy"},
-}
-```
-
-Start dedicated workers per queue:
-
-```bash
-celery -A myapp worker -Q emails --concurrency=20
-celery -A myapp worker -Q heavy --concurrency=4
-celery -A myapp worker -Q default --concurrency=8
-```
-
----
-
-## Retry Configuration
-
-Global retry defaults:
-
-```python
-task_max_retries = 3
-task_default_retry_delay = 60   # seconds
-```
-
-For per-task exponential backoff with jitter:
-
-```python
-@app.task(
-    autoretry_for=(Exception,),
-    max_retries=5,
-    retry_backoff=True,
-    retry_backoff_max=600,
-    retry_jitter=True,
-)
-def unreliable_task():
-    ...
-```
-
----
+For tasks where you never check the result, disable result storage entirely. This is both simpler and more efficient.
 
 ## Broker Connection Resilience
 
-```python
-broker_connection_retry_on_startup = True
-broker_connection_max_retries = 10
-broker_heartbeat = 10               # detect dead connections
-broker_pool_limit = 10
-```
+Workers maintain a persistent connection to the broker. When the broker restarts (routine maintenance, crash, failover), that connection breaks. Workers need to know how to reconnect automatically.
 
-For Redis, enable `socket_keepalive`:
+Without explicit reconnection configuration, a broker restart might leave workers in a broken state — connected but not receiving tasks, silently idle.
 
-```python
-broker_transport_options = {
-    "socket_keepalive": True,
-    "socket_keepalive_options": {
-        "TCP_KEEPIDLE": 60,
-        "TCP_KEEPCNT": 3,
-        "TCP_KEEPINTVL": 10,
-    },
-    "visibility_timeout": 43200,    # 12 hours — match your longest task
-}
-```
+Configure workers to retry connection on startup and to reconnect automatically when the connection drops. Set a heartbeat interval so dead connections are detected quickly rather than hanging silently.
 
-`visibility_timeout` for Redis: if a task takes longer than this, Redis considers it lost and re-delivers it. Set it higher than your longest expected task duration.
+## Deployment: Separate Processes, Managed by a Service Manager
 
----
+Three things must always run as separate processes:
 
-## Signals for Cross-Cutting Concerns
+1. **Workers** — one or more, depending on load
+2. **Beat** — exactly one
+3. **Flower** — one (optional but recommended)
 
-Hook into Celery's lifecycle signals for logging, tracing, and alerting without polluting every task:
+Each should be managed by a service manager (systemd, supervisord, or Docker with a restart policy). If any of them crash, the service manager restarts them automatically. Without this, a crash at 3 AM goes unnoticed until someone checks in the morning.
 
-```python
-from celery.signals import (
-    task_prerun, task_postrun, task_failure, task_retry,
-    worker_ready, worker_shutdown,
-)
+Beat is especially critical: it's a singleton that must always be running. A Beat outage means all scheduled tasks silently stop. Most outages of this type go unnoticed for hours because there's no visible error — things just don't happen.
 
-@task_failure.connect
-def on_task_failure(sender, task_id, exception, traceback, einfo, **kwargs):
-    # Send to Sentry, PagerDuty, etc.
-    sentry_sdk.capture_exception(exception)
+## Worker Memory Management
 
-@task_prerun.connect
-def on_task_start(sender, task_id, task, args, kwargs, **kwargs_):
-    # Start a span in your APM tool
-    pass
+Python processes accumulate memory over time — libraries cache things, garbage collection isn't perfect, and long-running processes can develop slow memory leaks.
 
-@worker_ready.connect
-def on_worker_ready(sender, **kwargs):
-    logger.info("Worker %s is ready", sender)
-```
+Workers can be configured to recycle themselves after processing N tasks. This limits memory growth: after 1000 tasks, the worker process exits and the service manager spawns a fresh one. The queue isn't lost — a new worker picks up the next task immediately.
 
----
+This is a pragmatic solution that trades a tiny bit of throughput (the restart cost) for predictable memory usage over long periods.
 
-## Django Integration
+## The Production Checklist (Mental Model)
 
-```python
-# myapp/celery.py
-import os
-from celery import Celery
+When evaluating a Celery deployment, ask these questions:
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "myapp.settings")
+**Reliability:** If a worker crashes mid-task, is the work re-queued or lost? (late ack)
 
-app = Celery("myapp")
-app.config_from_object("django.conf:settings", namespace="CELERY")
-app.autodiscover_tasks()  # finds tasks.py in each INSTALLED_APP
-```
+**Safety:** If a task is re-queued and runs twice, does that cause data corruption? (idempotency)
 
-```python
-# myapp/__init__.py
-from .celery import app as celery_app
-__all__ = ("celery_app",)
-```
+**Security:** Can arbitrary code be injected through task messages? (serializer)
 
-`autodiscover_tasks()` automatically imports `tasks.py` from every installed Django app.
+**Responsiveness:** Can a slow task type starve fast task types? (queue isolation)
 
----
+**Correctness:** Can a long task be re-delivered because of an undersized timeout? (visibility timeout)
 
-## Production Deployment
+**Efficiency:** Is the result backend filling up with records nobody reads? (result expiration)
 
-### systemd Service (Worker)
+**Operability:** If any component crashes, will it restart automatically? (service management)
 
-```ini
-# /etc/systemd/system/celery-worker.service
-[Unit]
-Description=Celery Worker
-After=network.target
+**Visibility:** Will you know when something goes wrong before users complain? (monitoring + alerts)
 
-[Service]
-User=celery
-Group=celery
-WorkingDirectory=/srv/myapp
-ExecStart=/srv/myapp/venv/bin/celery -A myapp worker \
-    --loglevel=info \
-    --concurrency=8 \
-    --max-tasks-per-child=1000
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`--max-tasks-per-child` recycles worker processes after N tasks — prevents memory leaks.
-
-### systemd Service (Beat)
-
-```ini
-# /etc/systemd/system/celery-beat.service
-[Unit]
-Description=Celery Beat Scheduler
-After=network.target
-
-[Service]
-User=celery
-WorkingDirectory=/srv/myapp
-ExecStart=/srv/myapp/venv/bin/celery -A myapp beat \
-    --loglevel=info \
-    --scheduler django_celery_beat.schedulers:DatabaseScheduler
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Docker Compose
-
-```yaml
-version: "3.9"
-services:
-  redis:
-    image: redis:7-alpine
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-
-  worker:
-    build: .
-    command: celery -A myapp worker --loglevel=info --concurrency=8
-    environment:
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
-    depends_on:
-      - redis
-    restart: unless-stopped
-
-  beat:
-    build: .
-    command: celery -A myapp beat --loglevel=info
-    environment:
-      CELERY_BROKER_URL: redis://redis:6379/0
-    depends_on:
-      - redis
-    restart: unless-stopped
-
-  flower:
-    build: .
-    command: celery -A myapp flower --port=5555
-    ports:
-      - "5555:5555"
-    depends_on:
-      - redis
-
-volumes:
-  redis_data:
-```
-
----
-
-## Checklist for Production
-
-- [ ] JSON serializer with `accept_content = ["json"]`
-- [ ] `task_acks_late = True` + `worker_prefetch_multiplier = 1`
-- [ ] `task_soft_time_limit` and `task_time_limit` set on every task
-- [ ] `result_expires` configured, or `task_ignore_result = True` for fire-and-forget
-- [ ] Explicit queues with dedicated workers per queue type
-- [ ] `broker_connection_retry_on_startup = True`
-- [ ] `visibility_timeout` > your longest task duration (Redis)
-- [ ] Single Beat process running as a managed service
-- [ ] [Flower](/programming/celery/flower) with authentication deployed
-- [ ] Error tracking (Sentry) hooked via `task_failure` signal
-- [ ] `timezone` set explicitly
-- [ ] Workers run with `--max-tasks-per-child` to prevent memory leaks
+Each of these is an independent concern. A system that gets all of them right is robust. Missing any one of them is a latent failure waiting to surface under the right conditions.

@@ -1,6 +1,6 @@
 ---
 title: Celery Beat
-description: Schedule periodic and recurring tasks with Celery Beat — the built-in cron-like scheduler.
+description: Understand how Celery Beat schedules periodic tasks and how it fits into the architecture.
 level: intermediate
 area: programming
 topic: celery
@@ -8,157 +8,118 @@ topic: celery
 
 # Celery Beat
 
-**Celery Beat** is Celery's built-in scheduler. It works like a cron daemon: it wakes up at the right time and enqueues tasks into the broker, where a [worker](/programming/celery/worker) picks them up and executes them.
+Beat is Celery's scheduler. Its job is simple: at the right moment, it puts a task into the broker queue so a worker can pick it up.
+
+Beat does not execute tasks. It only schedules them.
+
+## The Alarm Clock Analogy
+
+Think of Beat as an alarm clock, and the broker as a to-do board.
+
+When the alarm goes off, Beat writes a new task on the to-do board. A worker sees the task, picks it up, and does the work. Beat's job ends there — it goes back to watching the clock.
 
 ```
-Beat ──enqueues──► Broker ──► Worker ──► executes task
+Beat (alarm clock)
+  → "It's Monday 9 AM"
+  → writes task on broker ──► Worker picks it up and runs it
+  → goes back to watching the clock
 ```
 
-Beat does **not** execute tasks itself — it only schedules them.
+Beat runs continuously as a separate process. It wakes up frequently (roughly every second) to check whether any scheduled task is due.
 
-## Starting Beat
+## How Beat Knows What to Run and When
 
-```bash
-celery -A myapp beat --loglevel=info
+Beat holds a **schedule** — a list of tasks and their timing rules.
+
+Each entry says:
+- Which task to call
+- How often (or at what time)
+- What arguments to pass
+
+The schedule can be written as code in your configuration, or stored in a database and edited dynamically.
+
+## Types of Timing Rules
+
+**Fixed interval** — run every N seconds. Simple. No cron syntax needed.
+
+```
+Every 30 seconds → heartbeat task
+Every 1 hour     → sync cache task
 ```
 
-Run this **alongside** at least one worker. Beat and worker are separate processes.
+**Crontab** — run at specific times, like Unix cron. Expressive: you specify the minute, hour, day of week, day of month, and month.
 
-> **Never run more than one Beat process** against the same schedule. Two Beat processes would enqueue every task twice.
-
-## Defining a Schedule
-
-### In Your Celery App Config
-
-```python
-from celery import Celery
-from celery.schedules import crontab
-
-app = Celery("myapp", broker="redis://localhost:6379/0")
-
-app.conf.beat_schedule = {
-    "send-report-every-monday": {
-        "task": "myapp.tasks.send_weekly_report",
-        "schedule": crontab(hour=9, minute=0, day_of_week="monday"),
-    },
-    "cleanup-every-midnight": {
-        "task": "myapp.tasks.cleanup_old_sessions",
-        "schedule": crontab(hour=0, minute=0),
-    },
-    "heartbeat-every-30s": {
-        "task": "myapp.tasks.heartbeat",
-        "schedule": 30.0,  # every 30 seconds
-    },
-}
+```
+Every Monday at 9 AM
+Every day at midnight
+Every 15 minutes
+The 1st of every month at 6 AM
 ```
 
-### Schedule Types
+**Solar** — run at sunrise or sunset for a given geographic location. Unusual, but built-in.
 
-| Type | Example | Meaning |
+## The Schedule File
+
+Beat needs to remember when each task last ran, so it doesn't re-fire tasks if it restarts.
+
+It stores this in a local file (a small database). On startup, it reads this file to know where it left off. If the file is missing or corrupted, Beat thinks no tasks have ever run and may fire them all immediately.
+
+This is an important operational detail: **protect the schedule file**. Don't delete it. Don't let it live in ephemeral storage (like a Docker container layer that gets wiped on restart).
+
+## Dynamic Schedules
+
+The built-in schedule is static — defined in code. To change it, you modify the code and restart Beat.
+
+But sometimes you need a schedule that changes at runtime — think a multi-tenant SaaS where each customer sets their own report timing. For this, the schedule can live in a database. Beat reads from the database on each tick, so changes take effect without any restart.
+
+This is what `django-celery-beat` provides: a database-backed schedule with an admin interface. You can add, edit, and delete periodic tasks through a UI without touching code.
+
+## The Critical Rule: One Beat Process
+
+Beat is not safe to run in multiple instances. If two Beat processes are running against the same schedule, both will fire each task — every task runs twice.
+
+```
+Beat-1: "It's 9 AM Monday, enqueue weekly-report"
+Beat-2: "It's 9 AM Monday, enqueue weekly-report"
+→ weekly-report runs TWICE
+```
+
+Always run exactly one Beat process. In a multi-server deployment, this means Beat must be a singleton service, not something that runs on every server.
+
+## Beat vs. Cron
+
+Beat is often compared to Unix cron. They're conceptually similar, but Beat has advantages in a Celery context:
+
+| | Unix Cron | Celery Beat |
 |---|---|---|
-| `float` / `int` | `30.0` | Every N seconds |
-| `timedelta` | `timedelta(hours=1)` | Every hour |
-| `crontab` | `crontab(minute="*/15")` | Cron syntax |
-| `solar` | `solar("sunrise", lat, lng)` | Sunrise/sunset |
+| Where tasks run | On the cron machine | On any available worker |
+| Scale | Single machine | Distributed workers |
+| Task history / retries | No | Yes (via Celery) |
+| Dynamic scheduling | No (edit crontab) | Yes (database scheduler) |
+| Integration with app | Manual scripts | Native Celery tasks |
 
-### `crontab` Reference
+The key difference: cron runs a command on the cron machine. Beat *enqueues* a task that a worker runs. The work is distributed.
 
-```python
-from celery.schedules import crontab
+## Timezone Awareness
 
-crontab()                               # every minute
-crontab(minute=0)                       # top of every hour
-crontab(hour=8, minute=30)              # 8:30 AM every day
-crontab(day_of_week="mon,fri")          # Mondays and Fridays
-crontab(day_of_month="1")              # 1st of every month
-crontab(month_of_year="1,7")           # January and July
-crontab(minute="*/15")                  # every 15 minutes
+Beat respects timezone settings. A crontab that says "9 AM" means 9 AM in whatever timezone you configure. If you don't configure one, it defaults to UTC — which may not be what you intend.
+
+Always set the timezone explicitly. Daylight saving time transitions can cause tasks to fire at unexpected times if the timezone is misconfigured.
+
+## Beat and Workers Together
+
+Beat and workers are separate processes. In development, they can run together in a single process for convenience. In production, always keep them separate — a crash in the worker process should not stop the scheduler, and vice versa.
+
+```
+Production setup:
+  [Beat process]    ──► Broker ──► [Worker process(es)]
+
+Development shortcut:
+  [Beat + Worker in one process]   (never in production)
 ```
 
-## Passing Arguments to Scheduled Tasks
+## What Happens If Beat Goes Down?
 
-```python
-app.conf.beat_schedule = {
-    "generate-pdf-report": {
-        "task": "myapp.tasks.generate_report",
-        "schedule": crontab(hour=6, minute=0),
-        "args": ("monthly",),
-        "kwargs": {"format": "pdf", "send_email": True},
-    },
-}
-```
+If Beat stops, no new scheduled tasks are enqueued. Workers keep running their current tasks, but no new scheduled work arrives.
 
-## The Schedule Database
-
-Beat tracks **when each task last ran** in a local file called `celerybeat-schedule` (a shelve database). This ensures it doesn't double-fire tasks after a restart.
-
-```bash
-# Custom schedule file location
-celery -A myapp beat -s /var/run/celerybeat-schedule
-```
-
-Do **not** delete this file while beat is running, or it may re-fire tasks immediately on restart.
-
-## django-celery-beat (Dynamic Schedules)
-
-The built-in schedule is static — you must restart Beat to change it. For **dynamic schedules editable at runtime** (e.g., via an admin UI), use `django-celery-beat`:
-
-```bash
-pip install django-celery-beat
-```
-
-```python
-# settings.py
-INSTALLED_APPS = [
-    ...
-    "django_celery_beat",
-]
-
-# celery.py
-app.conf.beat_scheduler = "django_celery_beat.schedulers:DatabaseScheduler"
-```
-
-Now your schedule lives in the database. Django admin gets a UI to add/edit/delete periodic tasks without any code changes or restarts.
-
-## Timezone
-
-Beat respects the `timezone` setting:
-
-```python
-app.conf.timezone = "America/New_York"
-app.conf.enable_utc = True
-```
-
-Always set a timezone explicitly. Default is UTC — make sure your crontab hours match what you intend.
-
-## Beat + Worker in One Process (Dev Only)
-
-For local development you can run beat and worker in a single process:
-
-```bash
-celery -A myapp worker --beat --loglevel=info
-```
-
-**Never do this in production** — if the process crashes, both scheduling and execution stop.
-
-## Deployment Checklist
-
-- Run exactly **one** Beat process
-- Run Beat and workers as separate OS services (systemd, supervisord, Docker containers)
-- Mount the schedule file on persistent storage (not a Docker ephemeral layer)
-- Set `timezone` explicitly
-- Monitor Beat with [Flower](/programming/celery/flower) — if Beat stops, scheduled tasks silently stop running
-
-## Troubleshooting
-
-**Tasks not running on schedule**
-- Confirm Beat is running (`celery -A myapp inspect ping` won't show Beat — check the process list)
-- Check Beat logs for scheduling output
-- Verify the timezone matches your expectation
-
-**Tasks run twice**
-- You have two Beat processes running — kill one
-
-**Tasks ran many times after restart**
-- Beat's schedule file was deleted or corrupted — it thought tasks had never run
-- Restore the schedule file from backup, or accept the one-time burst and re-create it
+When Beat restarts, it checks the schedule file. If it knows a task was due while it was down, it may fire it immediately upon restart (depending on configuration). This is called **catchup** — and it can cause a burst of tasks all at once. Consider whether catchup is desirable for your use case, and disable it if not.

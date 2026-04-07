@@ -1,6 +1,6 @@
 ---
 title: Celery Worker
-description: How Celery workers consume tasks, concurrency models, pools, and operational patterns.
+description: Understand what a worker is, how it consumes tasks, and how concurrency works inside it.
 level: intermediate
 area: programming
 topic: celery
@@ -8,181 +8,155 @@ topic: celery
 
 # Celery Worker
 
-A **Celery worker** is a long-running process that connects to the broker, pulls tasks off the queue, and executes them. You can run many workers — on the same machine or across a fleet of servers — and they all share the same queue.
+A worker is a process that watches the broker, picks up tasks, and runs them. It's the engine room of Celery — the place where your actual code executes.
 
-## Starting a Worker
+## What a Worker Does, Step by Step
 
-```bash
-celery -A myapp worker --loglevel=info
+1. It connects to the broker on startup.
+2. It tells the broker: *"I'm ready. Send me tasks from queue X."*
+3. It waits. When a task message arrives, it deserializes it (unpacks the function name and arguments).
+4. It executes the function.
+5. If a result backend is configured, it stores the return value.
+6. It acknowledges the message (tells the broker: *"done, remove this from the queue"*).
+7. It goes back to waiting.
+
+This loop runs continuously. Workers are meant to be long-lived processes.
+
+## Concurrency: Doing Multiple Things at Once
+
+A single worker process can handle more than one task at a time. It achieves this through a **pool** — a set of sub-processes or threads working in parallel.
+
+Think of the worker as a manager and the pool as a team of workers the manager oversees:
+
+```
+Worker (manager)
+  ├── Pool slot 1 → task A (running)
+  ├── Pool slot 2 → task B (running)
+  ├── Pool slot 3 → task C (running)
+  └── Pool slot 4 → (idle, waiting)
 ```
 
-- `-A myapp` — points to your Celery application instance
-- `--loglevel=info` — log verbosity (`debug`, `info`, `warning`, `error`, `critical`)
+The number of slots is the **concurrency** setting. By default it equals the number of CPU cores on the machine.
 
-The worker prints its configuration on startup, including how many concurrent slots it has and which queues it listens to.
+## The Two Types of Work — and Why It Matters
 
-## Concurrency and Pools
+Not all tasks are the same. There are two fundamentally different kinds of slow operations:
 
-The worker can process multiple tasks at the same time using a **pool**. Celery supports several pool backends:
+**CPU-bound work** — the processor is actually busy computing. Examples: image encoding, number crunching, machine learning inference. The CPU is the bottleneck.
 
-### Prefork (default)
+**I/O-bound work** — the processor is mostly waiting. Examples: fetching a URL, querying a database, reading a file. The network or disk is the bottleneck, not the CPU.
 
-Uses Python's `multiprocessing`. Spawns N child processes, each running tasks independently.
+This distinction matters because it determines which pool strategy is optimal.
 
-```bash
-celery -A myapp worker --pool=prefork --concurrency=8
+## Pool Strategies
+
+### Prefork (Multiple Processes)
+
+The default. Spawns N independent Python processes. Each process runs tasks in isolation.
+
+```
+Worker
+  ├── Process 1  (full Python runtime, own memory)
+  ├── Process 2  (full Python runtime, own memory)
+  └── Process 3  (full Python runtime, own memory)
 ```
 
-- Best for **CPU-bound** tasks (number crunching, image processing)
-- Each child is a full Python process — memory overhead per child
-- Default concurrency = number of CPU cores
+Good for CPU-bound tasks because each process runs on its own CPU core in true parallel. No Python GIL interference.
 
-### Gevent / Eventlet
+Drawback: each process has memory overhead (~50-100MB per process). With 16 processes, that's 800MB just for the pool.
 
-Green-thread pools for **I/O-bound** tasks (HTTP calls, DB queries).
+### Gevent / Eventlet (Green Threads)
 
-```bash
-pip install gevent
-celery -A myapp worker --pool=gevent --concurrency=500
+Instead of real OS processes or threads, these use **green threads** — cooperative micro-threads managed by a library, not the OS.
+
+The key insight: when a green thread hits an I/O wait (a network call, a sleep), it voluntarily pauses and lets another green thread run. This means one OS thread can juggle thousands of concurrent I/O operations.
+
+```
+Single OS Thread
+  → task A starts HTTP call → pauses
+  → task B starts DB query → pauses
+  → task C completes → yields back
+  → task A resumes when HTTP responds
 ```
 
-- Thousands of concurrent tasks with low memory
-- Works by monkey-patching blocking I/O calls to be async
-- Does **not** help CPU-bound tasks (GIL still applies)
+Good for I/O-bound tasks. You can set concurrency to 500 or 1000 without spawning 500 processes.
 
-### Solo
-
-Runs tasks in the main thread — no subprocess, no concurrency. Useful for debugging.
-
-```bash
-celery -A myapp worker --pool=solo
-```
+Useless for CPU-bound tasks — green threads don't provide real parallelism.
 
 ### Threads
 
-Uses Python threads instead of processes.
+Uses actual OS threads. The Python GIL limits true parallelism for CPU work, but threads are fine for I/O-bound tasks and have lower setup overhead than processes.
 
-```bash
-celery -A myapp worker --pool=threads --concurrency=16
+### Solo
+
+No pool. Tasks run sequentially in the main process. Useful only for debugging.
+
+## Task Prefetching
+
+Workers don't wait passively for one task at a time. They **prefetch** — they pull several tasks from the broker before finishing their current ones. This reduces the round-trip latency of fetching each task individually.
+
+The **prefetch multiplier** controls how many tasks a worker reserves per pool slot. A multiplier of 4 with 4 pool slots means the worker grabs up to 16 tasks at once.
+
+This is efficient for fast, uniform tasks. But for slow or uneven tasks, prefetching causes a problem:
+
+```
+Slot 1: running a 10-minute task
+Slot 2: running a 10-minute task
+Reserved (prefetched): 8 more tasks sitting idle
+
+→ Other workers have nothing to do even though the queue has work
 ```
 
-Limited by the GIL for CPU work; fine for I/O.
-
-## Queues
-
-By default all tasks go to a queue named `celery`. You can define multiple queues and route tasks to specific ones:
-
-```python
-# celeryconfig.py
-task_routes = {
-    "myapp.tasks.send_email": {"queue": "emails"},
-    "myapp.tasks.encode_video": {"queue": "heavy"},
-}
-```
-
-Start workers that listen to specific queues:
-
-```bash
-# Dedicated email worker
-celery -A myapp worker -Q emails --concurrency=20
-
-# Heavy compute worker
-celery -A myapp worker -Q heavy --concurrency=4
-```
-
-Workers only pick tasks from the queues they subscribe to. This lets you allocate the right hardware to the right work.
-
-## Prefetch Multiplier
-
-The worker pre-fetches tasks from the broker before it has finished the current one. This improves throughput but can cause long tasks to hog a slot.
-
-```python
-# celeryconfig.py
-worker_prefetch_multiplier = 1  # fetch only one task at a time per worker slot
-```
-
-Setting it to `1` is recommended for long-running or heterogeneous tasks to ensure fair distribution.
+For long or variable-duration tasks, set the multiplier to 1. Each slot only grabs one task at a time, ensuring fair distribution.
 
 ## Task Acknowledgment
 
-By default, a task is **acknowledged** (removed from the queue) as soon as the worker receives it, even before execution finishes. If the worker crashes mid-task, the task is lost.
+When a worker picks up a task, when does it tell the broker *"I've handled this, you can delete it"*?
 
-For reliability, use late acknowledgment:
+**Acknowledge on receipt (default):** The task is removed from the broker queue the moment the worker receives it — before execution even starts. If the worker crashes during execution, the task is gone.
 
-```python
-# celeryconfig.py
-task_acks_late = True
-worker_prefetch_multiplier = 1
+**Acknowledge on completion (late ack):** The task stays in the broker queue until execution finishes. If the worker crashes, the broker re-delivers the task to another worker.
+
+Late acknowledgment makes your system more resilient, but it means tasks might run more than once. That's why tasks should be designed to be **idempotent** — running them twice produces the same outcome as running them once.
+
+## Multiple Workers
+
+You can run many workers, all connected to the same broker. They compete to pick tasks from the queue — whoever is free and fast enough picks the next task.
+
+```
+Broker Queue: [task1] [task2] [task3] [task4]
+                  ↙          ↘
+           Worker A        Worker B
+           (server 1)      (server 2)
 ```
 
-With `acks_late=True`, the task stays in the queue until the worker explicitly acknowledges completion. If the worker crashes, the broker re-delivers the task.
+This is the horizontal scaling model. Adding workers increases throughput without changing application code.
 
-> Make sure tasks are [idempotent](/programming/celery/tasks) when using late ack — they may run more than once.
+## Queues and Specialization
 
-## Autoscaling
+By default all tasks go into one queue. But you can have multiple queues and tell different workers to listen to different ones.
 
-The worker can automatically scale the number of processes between a min and max based on load:
+Why? Because a heavy, slow task (video encoding) and a lightweight task (send email) shouldn't compete for the same pool slots. If 4 video-encoding tasks fill all slots, email sending is stuck.
 
-```bash
-celery -A myapp worker --autoscale=10,2
+With specialized queues:
+
+```
+"emails" queue  ──► email-worker  (20 slots, gevent)
+"heavy" queue   ──► heavy-worker  (2 slots, prefork)
+"default" queue ──► general-worker (8 slots, prefork)
 ```
 
-This means: at least 2 processes, up to 10 when there's backlog.
+Each queue gets the right concurrency model and the right amount of resources.
 
-## Worker Signals and Lifecycle
+## Worker Lifecycle
 
-Workers emit signals you can hook into:
+```
+Start → Connect to broker → Announce readiness
+      → Fetch task → Execute → Store result → Acknowledge
+      → Repeat until shutdown signal
 
-```python
-from celery.signals import worker_ready, worker_shutdown
-
-@worker_ready.connect
-def on_ready(sender, **kwargs):
-    print("Worker is ready!")
-
-@worker_shutdown.connect
-def on_shutdown(sender, **kwargs):
-    print("Worker shutting down...")
+Shutdown (graceful): finish current tasks, then exit
+Shutdown (forced):   exit immediately, in-flight tasks may be re-queued
 ```
 
-Useful for warming up caches, opening DB connection pools, or flushing state on shutdown.
-
-## Graceful Shutdown
-
-Send `SIGTERM` to a worker and it finishes its current tasks before exiting:
-
-```bash
-kill -TERM <worker_pid>
-```
-
-Force-kill with `SIGKILL` (`kill -9`) only as a last resort — in-flight tasks will be re-queued if `acks_late` is on, or lost if not.
-
-## Running Multiple Workers
-
-On a single machine:
-
-```bash
-celery -A myapp worker -n worker1@%h --concurrency=4
-celery -A myapp worker -n worker2@%h -Q heavy --concurrency=2
-```
-
-`-n` sets a unique name. `%h` expands to the hostname.
-
-With **supervisord** or **systemd**, you can manage these as services so they restart automatically on failure.
-
-## Monitoring Worker Health
-
-The worker exposes a control API you can query:
-
-```bash
-# Inspect active tasks
-celery -A myapp inspect active
-
-# Ping all workers
-celery -A myapp inspect ping
-
-# See registered tasks
-celery -A myapp inspect registered
-```
-
-For a real-time dashboard, see [Flower](/programming/celery/flower).
+Workers should be managed as services (systemd, Docker, supervisor) so they restart automatically if they crash.
